@@ -13,7 +13,7 @@ import numpy as np
 class AppConfig:
     """Centralized configuration for the application"""
     # Model configuration
-    model_path: Path = Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\Segmentation2.torchscript")
+    model_path: Path = Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\Segmentation1.torchscript")
     
     # Video source configuration - can be camera index (0, 1, 2) or RTSP URL
     camera_source: Union[int, str] = 0  # Can be 0 for webcam or "rtsp://..." for RTSP
@@ -680,7 +680,7 @@ def main():
             pass
     
     config = AppConfig(
-        model_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\Segmentation2.torchscript"),
+        model_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\Segmentation1.torchscript"),
         camera_source=camera_source,  # Use 0 for webcam or RTSP URL for stream
         frame_width=640,
         frame_height=480,
