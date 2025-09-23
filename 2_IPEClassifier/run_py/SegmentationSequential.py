@@ -265,7 +265,7 @@ class YOLOModel(IModel):
 class SequentialMemory:
     """Stores detection sequences across multiple frames"""
     
-    def __init__(self, sequence_timeout: float = 360.0):
+    def __init__(self, sequence_timeout: float = 15.0):
         self.sequence_timeout = sequence_timeout
         self.detection_sequences = {}
         self.current_sequence_id = 0
@@ -342,7 +342,7 @@ class AlertManager:
 class TimeWindowCounter:
     """Manages time-based counter with rolling window"""
     
-    def __init__(self, time_window_seconds: int = 10):
+    def __init__(self, time_window_seconds: int = 20):
         self.time_window = time_window_seconds
         self.detection_history = deque()
         self.current_counts = Counter()
