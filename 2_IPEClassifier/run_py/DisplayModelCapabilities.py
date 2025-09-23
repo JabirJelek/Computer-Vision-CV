@@ -16,7 +16,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("DisplayModelCapabilites.log"),
+        logging.FileHandler("DisplayModelCapabilities.log"),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -57,6 +57,11 @@ class AppConfig:
     model_load_timeout: int = 30  # Seconds to wait for model to load
     model_retry_interval: int = 5  # Seconds between model loading retries
     
+    # Frame skipping configuration for high FPS
+    frame_skip: int = 1  # Process every nth frame (1 = process all frames)
+    display_every_frame: bool = True  # Whether to display every frame or only processed ones
+    target_fps: int = 30  # Target FPS for display
+    
     def __post_init__(self):
         # Initialize default values for mutable objects
         if self.model_paths is None:
@@ -73,6 +78,10 @@ class AppConfig:
                 "all_three": (0, 255, 255),  # Yellow for all three classes
                 "two_classes": (255, 0, 255)  # Magenta for two classes
             }
+        
+        # Validate frame skip value
+        if self.frame_skip < 1:
+            self.frame_skip = 1
 
 class AlertManager:
     """Manages audio alerts with cooldown functionality"""
@@ -508,6 +517,62 @@ class ObjectDetector:
         self.model_failures = 0
         self.max_model_failures = 3  # Maximum model failures before switching
         
+        # Frame skipping variables
+        self.frame_count = 0
+        self.last_processed_frame = None
+        self.fps_counter = FPSCounter()  # Add FPS counter
+        
+        # Initialize components with error handling
+        try:
+            self.model_manager = ModelManager(config)
+            if not self.model_manager.load_models():
+                raise RuntimeError("Failed to load any models")
+                
+            self.alert_manager = AlertManager(config)
+            self.visualizer = DetectionVisualizer(config)
+            self.time_window_counter = TimeWindowCounter(config.counter_time_window)
+            
+            # Initialize video source
+            if not self.setup_video_source():
+                raise RuntimeError("Failed to initialize video source")
+                
+            logger.info("ObjectDetector initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize ObjectDetector: {e}")
+            raise
+    
+    def should_process_frame(self) -> bool:
+        """Determine if current frame should be processed based on frame_skip setting"""
+        return self.frame_count % self.config.frame_skip == 0
+    
+    def process_frame_with_skipping(self, frame):
+        """Process frame with frame skipping logic"""
+        try:
+            # Update frame counter
+            self.frame_count += 1
+            
+            # Check if we should process this frame
+            if self.should_process_frame():
+                # Process the frame normally
+                processed_frame = self.process_frame(frame)
+                self.last_processed_frame = processed_frame
+                return processed_frame
+            else:
+                # Use the last processed frame or current frame with overlay
+                if self.last_processed_frame is not None and self.config.display_every_frame:
+                    # We have a previous processed frame, use it
+                    return self.last_processed_frame
+                else:
+                    # No previous processed frame or we want to show raw frames
+                    # Just resize the current frame without processing
+                    return cv2.resize(frame, (1024, 576))
+                    
+        except Exception as e:
+            logger.error(f"Error in process_frame_with_skipping: {e}")
+            # Fallback to basic frame display
+            return cv2.resize(frame, (1024, 576))
+        
         # Initialize components with error handling
         try:
             self.model_manager = ModelManager(config)
@@ -755,15 +820,35 @@ class ObjectDetector:
                 # Reset failure counter on successful frame read
                 self.consecutive_failures = 0
                 
-                # Process frame
-                processed_frame = self.process_frame(frame)
+                # Process frame with skipping logic
+                processed_frame = self.process_frame_with_skipping(frame)
+                
+                # Add FPS information to frame
+                self.fps_counter.update()
+                fps = self.fps_counter.get_fps()
+                skip_status = f"Skip: {self.config.frame_skip}x" if self.config.frame_skip > 1 else "Processing all frames"
+                
+                cv2.putText(
+                    processed_frame, 
+                    f"FPS: {fps:.1f} | {skip_status} | Frame: {self.frame_count}", 
+                    (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 
+                    0.6, 
+                    (255, 255, 0), 
+                    2
+                )
                 
                 # Display the resulting frame
                 cv2.imshow('YOLOv8 Live Detection', processed_frame)
                 
-                # Exit on 'q' key press
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+                # Exit on 'q' key press, allow changing skip rate with number keys
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('q'):
                     break
+                elif ord('1') <= key <= ord('9'):  # Press 1-9 to change frame skip rate
+                    new_skip = key - ord('0')
+                    self.config.frame_skip = new_skip
+                    logger.info(f"Frame skip rate changed to: {new_skip}")
                     
         except Exception as e:
             logger.critical(f"Critical error in main loop: {e}")
@@ -775,6 +860,28 @@ class ObjectDetector:
                 logger.info("Application shut down successfully")
             except Exception as e:
                 logger.error(f"Error during cleanup: {e}")
+
+class FPSCounter:
+    """Simple FPS counter"""
+    def __init__(self):
+        self.start_time = time.time()
+        self.frame_count = 0
+        self.current_fps = 0
+        
+    def update(self):
+        """Update FPS calculation"""
+        self.frame_count += 1
+        current_time = time.time()
+        elapsed = current_time - self.start_time
+        
+        if elapsed >= 1.0:  # Update FPS every second
+            self.current_fps = self.frame_count / elapsed
+            self.frame_count = 0
+            self.start_time = current_time
+    
+    def get_fps(self):
+        """Get current FPS"""
+        return self.current_fps
 
 def main():
     """Main function to initialize and run the application"""
@@ -801,7 +908,7 @@ def main():
         
         # Define multiple models with fallback - first one is preferred
         model_configs = [
-            Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect.torchscript"),  # Primary detection model
+            Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestIPE-2.torchscript"),  # Primary detection model
             #Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\segmentation_model.pt"),  # Fallback segmentation model
             #Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\backup_detection_model.pt"),  # Backup detection model
         ]
@@ -825,7 +932,11 @@ def main():
                 "two_classes": (255, 0, 255)  # Magenta for two classes
             },
             model_load_timeout=30,  # Seconds to wait for model to load
-            model_retry_interval=5  # Seconds between model loading retries
+            model_retry_interval=5,  # Seconds between model loading retries
+            # New frame skipping configuration
+            frame_skip=3,  # Process every 2nd frame (2x performance boost)
+            display_every_frame=True,  # Show detections on all frames
+            target_fps=30  # Target FPS for display
         )
         
         # Create and run the detector
