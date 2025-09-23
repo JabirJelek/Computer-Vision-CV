@@ -7,3 +7,49 @@
 2025-09-22 16:45:28,303 - INFO - Video source initialized: 0
 2025-09-22 16:45:28,303 - INFO - ObjectDetector initialized successfully
 2025-09-22 16:45:37,665 - INFO - Application shut down successfully
+2025-09-23 13:39:00,500 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestSmallS.torchscript
+2025-09-23 13:39:00,505 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestSmallS.torchscript
+2025-09-23 13:39:01,816 - INFO - Video source initialized: 1
+2025-09-23 13:39:01,817 - INFO - ObjectDetector initialized successfully
+2025-09-23 13:39:12,498 - INFO - Application shut down successfully
+2025-09-23 13:39:20,624 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestSmallS.torchscript
+2025-09-23 13:39:20,627 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestSmallS.torchscript
+2025-09-23 13:39:22,095 - INFO - Video source initialized: 0
+2025-09-23 13:39:22,096 - INFO - ObjectDetector initialized successfully
+2025-09-23 13:39:51,909 - INFO - Application shut down successfully
+2025-09-23 13:40:12,623 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestSmall.torchscript
+2025-09-23 13:40:12,626 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestSmall.torchscript
+2025-09-23 13:40:14,067 - INFO - Video source initialized: 0
+2025-09-23 13:40:14,068 - INFO - ObjectDetector initialized successfully
+2025-09-23 13:40:30,636 - INFO - Application shut down successfully
+2025-09-23 13:54:07,087 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript
+2025-09-23 13:54:07,092 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript
+2025-09-23 13:54:08,716 - INFO - Video source initialized: 0
+2025-09-23 13:54:08,716 - INFO - ObjectDetector initialized successfully
+2025-09-23 13:54:17,072 - INFO - Application shut down successfully
+2025-09-23 13:55:06,851 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript
+2025-09-23 13:55:06,854 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript
+2025-09-23 13:55:08,370 - INFO - Video source initialized: 0
+2025-09-23 13:55:08,371 - INFO - ObjectDetector initialized successfully
+2025-09-23 13:55:10,654 - INFO - Application shut down successfully
+2025-09-23 13:55:19,573 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript
+2025-09-23 13:55:19,576 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript
+2025-09-23 13:55:22,414 - INFO - Video source initialized: 1
+2025-09-23 13:55:22,415 - INFO - ObjectDetector initialized successfully
+2025-09-23 13:55:30,479 - INFO - Application shut down successfully
+2025-09-23 14:30:40,928 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript
+2025-09-23 14:30:40,932 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript
+2025-09-23 14:30:42,306 - INFO - Video source initialized: 1
+2025-09-23 14:30:42,307 - INFO - ObjectDetector initialized successfully
+2025-09-23 14:30:55,293 - INFO - Frame skip rate changed to: 1
+2025-09-23 14:30:57,858 - INFO - Application shut down successfully
+2025-09-23 14:32:14,492 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript
+2025-09-23 14:32:14,495 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript
+2025-09-23 14:32:15,751 - INFO - Video source initialized: 1
+2025-09-23 14:32:15,752 - INFO - ObjectDetector initialized successfully
+2025-09-23 14:32:32,408 - INFO - Application shut down successfully
+2025-09-23 15:38:42,557 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript
+2025-09-23 15:38:42,565 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript
+2025-09-23 15:38:45,485 - INFO - Video source initialized: 1
+2025-09-23 15:38:45,486 - INFO - ObjectDetector initialized successfully
+2025-09-23 15:39:05,419 - INFO - Application shut down successfully

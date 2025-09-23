@@ -908,7 +908,7 @@ def main():
         
         # Define multiple models with fallback - first one is preferred
         model_configs = [
-            Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestIPE-2.torchscript"),  # Primary detection model
+            Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript"),  # Primary detection model
             #Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\segmentation_model.pt"),  # Fallback segmentation model
             #Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\backup_detection_model.pt"),  # Backup detection model
         ]
