@@ -5,9 +5,15 @@ import pygame
 import threading
 import time
 from collections import Counter, deque
-from dataclasses import dataclass
-from typing import Dict, Tuple, Any, Union, List, Optional
+from dataclasses import dataclass, field
+from typing import Dict, Tuple, Any, Union, List, Optional, Set
 import numpy as np
+from abc import ABC, abstractmethod
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 @dataclass
 class AppConfig:
@@ -15,122 +21,311 @@ class AppConfig:
     # Model configuration
     model_path: Path = Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\Segmentation1.torchscript")
     
-    # Video source configuration - can be camera index (0, 1, 2) or RTSP URL
-    camera_source: Union[int, str] = 0  # Can be 0 for webcam or "rtsp://..." for RTSP
+    # Video source configuration
+    camera_source: Union[int, str] = 0
     frame_width: int = 640
     frame_height: int = 480
     
     # Detection configuration
     confidence_threshold: float = 0.5
-    class_color_map: Dict[int, Tuple[int, int, int]] = None
+    class_color_map: Dict[int, Tuple[int, int, int]] = field(default_factory=dict)
     
     # Alert configuration
     alert_sound_path: Path = Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3")
     alert_cooldown: int = 5
-    class_cooldowns: Dict[int, int] = None
+    class_cooldowns: Dict[int, int] = field(default_factory=dict)
     
     # Counter configuration
-    counter_time_window: int = 10  # Time window in seconds for the cumulative counter
+    counter_time_window: int = 10
     
     # RTSP configuration
-    reconnect_delay: int = 5  # Seconds between reconnection attempts
-    max_consecutive_failures: int = 3  # Maximum failures before attempting reconnection
+    reconnect_delay: int = 5
+    max_consecutive_failures: int = 3
     
     # Conditional labeling configuration
-    special_classes: Tuple[int, ...] = (0, 1, 2)  # Classes to check for conditional labeling
-    conditional_box_colors: Dict[str, Tuple[int, int, int]] = None  # Colors for conditional boxes
+    special_classes: Tuple[int, ...] = (0, 1, 2)
+    conditional_box_colors: Dict[str, Tuple[int, int, int]] = field(default_factory=dict)
     
     # Segmentation configuration
-    mask_alpha: float = 0.5  # Transparency for segmentation masks
-    draw_masks: bool = True  # Whether to draw segmentation masks
-    draw_boxes: bool = True  # Whether to draw bounding boxes
+    mask_alpha: float = 0.5
+    draw_masks: bool = True
+    draw_boxes: bool = True
+    
+    # Display configuration
+    display_width: int = 1024
+    display_height: int = 576
     
     def __post_init__(self):
-        # Initialize default values for mutable objects
-        if self.class_color_map is None:
+        # Initialize default values
+        if not self.class_color_map:
             self.class_color_map = {0: (0, 0, 255), 1: (0, 255, 0)}
         
-        if self.class_cooldowns is None:
+        if not self.class_cooldowns:
             self.class_cooldowns = {0: 10, 1: 5, 2: 15}
             
-        if self.conditional_box_colors is None:
+        if not self.conditional_box_colors:
             self.conditional_box_colors = {
-                "all_three": (0, 255, 255),  # Yellow for all three classes
-                "two_classes": (255, 0, 255),  # Magenta for two classes
-                "sequential_complete": (0, 255, 0)  # Green for sequential detection
+                "all_three": (0, 255, 255),
+                "two_classes": (255, 0, 255),
+                "sequential_complete": (0, 255, 0)
             }
+
+class IVideoSource(ABC):
+    """Abstract interface for video sources"""
+    
+    @abstractmethod
+    def is_opened(self) -> bool:
+        pass
+    
+    @abstractmethod
+    def read(self) -> Tuple[bool, Optional[np.ndarray]]:
+        pass
+    
+    @abstractmethod
+    def release(self):
+        pass
+    
+    @abstractmethod
+    def reconnect(self) -> bool:
+        pass
+
+class CameraVideoSource(IVideoSource):
+    """Video source for camera input"""
+    
+    def __init__(self, config: AppConfig):
+        self.config = config
+        self.cap = None
+        self.setup_camera()
+    
+    def setup_camera(self) -> bool:
+        """Initialize camera source"""
+        try:
+            camera_source = (int(self.config.camera_source) 
+                           if isinstance(self.config.camera_source, str) and self.config.camera_source.isdigit()
+                           else self.config.camera_source)
+            
+            self.cap = cv2.VideoCapture(camera_source)
+            
+            if self.config.frame_width > 0:
+                self.cap.set(3, self.config.frame_width)
+            if self.config.frame_height > 0:
+                self.cap.set(4, self.config.frame_height)
+            
+            return self.cap.isOpened()
+        except Exception as e:
+            logger.error(f"Camera setup error: {e}")
+            return False
+    
+    def is_opened(self) -> bool:
+        return self.cap is not None and self.cap.isOpened()
+    
+    def read(self) -> Tuple[bool, Optional[np.ndarray]]:
+        if not self.is_opened():
+            return False, None
+        return self.cap.read()
+    
+    def release(self):
+        if self.cap is not None:
+            self.cap.release()
+    
+    def reconnect(self) -> bool:
+        self.release()
+        return self.setup_camera()
+
+class RTSPVideoSource(IVideoSource):
+    """Video source for RTSP streams"""
+    
+    def __init__(self, config: AppConfig):
+        self.config = config
+        self.cap = None
+        self.setup_rtsp()
+    
+    def setup_rtsp(self) -> bool:
+        """Initialize RTSP source"""
+        try:
+            self.cap = cv2.VideoCapture(self.config.camera_source)
+            
+            # Optimize for RTSP
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            self.cap.set(cv2.CAP_PROP_FPS, 30)
+            
+            if self.config.frame_width > 0:
+                self.cap.set(3, self.config.frame_width)
+            if self.config.frame_height > 0:
+                self.cap.set(4, self.config.frame_height)
+            
+            # Test connection
+            if not self.cap.isOpened():
+                return False
+                
+            ret, frame = self.cap.read()
+            return ret
+        except Exception as e:
+            logger.error(f"RTSP setup error: {e}")
+            return False
+    
+    def is_opened(self) -> bool:
+        return self.cap is not None and self.cap.isOpened()
+    
+    def read(self) -> Tuple[bool, Optional[np.ndarray]]:
+        if not self.is_opened():
+            return False, None
+        return self.cap.read()
+    
+    def release(self):
+        if self.cap is not None:
+            self.cap.release()
+    
+    def reconnect(self) -> bool:
+        self.release()
+        time.sleep(self.config.reconnect_delay)
+        return self.setup_rtsp()
+
+class VideoSourceFactory:
+    """Factory for creating appropriate video sources"""
+    
+    @staticmethod
+    def create_video_source(config: AppConfig) -> IVideoSource:
+        """Create video source based on configuration"""
+        if isinstance(config.camera_source, str) and "rtsp" in config.camera_source.lower():
+            return RTSPVideoSource(config)
+        else:
+            return CameraVideoSource(config)
+
+class DetectionResult:
+    """Data class to store detection results"""
+    
+    def __init__(self, box, mask, class_id: int, confidence: float, class_name: str):
+        self.box = box
+        self.mask = mask
+        self.class_id = class_id
+        self.confidence = confidence
+        self.class_name = class_name
+
+class IModel(ABC):
+    """Abstract interface for detection models"""
+    
+    @abstractmethod
+    def predict(self, frame: np.ndarray) -> List[DetectionResult]:
+        pass
+    
+    @abstractmethod
+    def get_class_name(self, class_id: int) -> str:
+        pass
+
+class YOLOModel(IModel):
+    """YOLO model implementation"""
+    
+    def __init__(self, config: AppConfig):
+        self.config = config
+        self.model = self._load_model()
+    
+    def _load_model(self) -> YOLO:
+        """Load the YOLO model"""
+        try:
+            model = YOLO(str(self.config.model_path), task='segment')
+            logger.info("Model loaded successfully")
+            return model
+        except Exception as e:
+            logger.error(f"Error loading model: {e}")
+            raise
+    
+    def predict(self, frame: np.ndarray) -> List[DetectionResult]:
+        """Run inference on a frame"""
+        results = []
+        
+        try:
+            model_results = self.model(frame, stream=True, verbose=False)
+            
+            for r in model_results:
+                if r.boxes is not None and len(r.boxes) > 0:
+                    for i, box in enumerate(r.boxes):
+                        conf = float(box.conf[0])
+                        
+                        if conf > self.config.confidence_threshold:
+                            cls_id = int(box.cls[0])
+                            class_name = self.get_class_name(cls_id)
+                            
+                            # Get corresponding mask
+                            mask = None
+                            if r.masks is not None and i < len(r.masks):
+                                mask = r.masks[i].data[0].cpu().numpy()
+                                mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]))
+                            
+                            results.append(DetectionResult(box, mask, cls_id, conf, class_name))
+        except Exception as e:
+            logger.error(f"Prediction error: {e}")
+        
+        return results
+    
+    def get_class_name(self, class_id: int) -> str:
+        """Get class name from model"""
+        return self.model.names.get(class_id, f"Class_{class_id}")
 
 class SequentialMemory:
     """Stores detection sequences across multiple frames"""
     
-    def __init__(self, sequence_timeout=60.0):  # 5-second sequence window
+    def __init__(self, sequence_timeout: float = 360.0):
         self.sequence_timeout = sequence_timeout
-        self.detection_sequences = {}  # {sequence_id: {class_id: timestamp}}
+        self.detection_sequences = {}
         self.current_sequence_id = 0
     
     def add_detection(self, class_id: int) -> int:
-        """Add detection to current sequence, return sequence ID"""
+        """Add detection to sequence"""
         current_time = time.time()
-        
-        # Check if we have an active sequence that includes this class
         active_sequence = self._get_active_sequence()
         
         if active_sequence and class_id not in active_sequence:
-            # Add to existing sequence
             active_sequence[class_id] = current_time
             return self.current_sequence_id
         else:
-            # Start new sequence
             self.current_sequence_id += 1
-            self.detection_sequences[self.current_sequence_id] = {
-                class_id: current_time
-            }
+            self.detection_sequences[self.current_sequence_id] = {class_id: current_time}
             return self.current_sequence_id
     
     def _get_active_sequence(self) -> Optional[Dict[int, float]]:
-        """Get most recent active sequence that hasn't timed out"""
+        """Get most recent active sequence"""
         current_time = time.time()
         
-        # Clean up old sequences
-        expired_sequences = [
+        # Clean expired sequences
+        expired = [
             seq_id for seq_id, seq_data in self.detection_sequences.items()
             if current_time - max(seq_data.values()) > self.sequence_timeout
         ]
-        for seq_id in expired_sequences:
+        for seq_id in expired:
             del self.detection_sequences[seq_id]
         
-        if self.detection_sequences:
-            return self.detection_sequences[self.current_sequence_id]
-        return None
+        return self.detection_sequences.get(self.current_sequence_id)
     
     def check_sequence_complete(self, required_classes: Tuple[int, ...]) -> bool:
-        """Check if current sequence contains all required classes"""
+        """Check if sequence contains all required classes"""
         active_sequence = self._get_active_sequence()
-        if not active_sequence:
-            return False
-        
-        return all(cls_id in active_sequence for cls_id in required_classes)
+        return active_sequence and all(cls_id in active_sequence for cls_id in required_classes)
     
-    def get_sequence_classes(self) -> set:
-        """Get set of classes in current active sequence"""
+    def get_sequence_classes(self) -> Set[int]:
+        """Get classes in current sequence"""
         active_sequence = self._get_active_sequence()
         return set(active_sequence.keys()) if active_sequence else set()
 
 class AlertManager:
     """Manages audio alerts with cooldown functionality"""
+    
     def __init__(self, config: AppConfig):
         self.config = config
         self.alert_timers = {}
-        pygame.mixer.init()
-        
+        self._init_audio()
+    
+    def _init_audio(self):
+        """Initialize audio system"""
         try:
-            self.alert_sound = pygame.mixer.Sound(str(config.alert_sound_path))
+            pygame.mixer.init()
+            self.alert_sound = pygame.mixer.Sound(str(self.config.alert_sound_path))
         except Exception as e:
-            print(f"Audio loading error: {e}")
+            logger.error(f"Audio initialization error: {e}")
             self.alert_sound = None
     
     def should_trigger_alert(self, cls_id: int) -> bool:
-        """Check if an alert should be triggered based on cooldown"""
+        """Check if alert should be triggered"""
         current_time = time.time()
         cooldown = self.config.class_cooldowns.get(cls_id, self.config.alert_cooldown)
         
@@ -140,250 +335,247 @@ class AlertManager:
         return False
     
     def play_alert(self):
-        """Play the alert sound in a non-blocking thread"""
+        """Play alert sound"""
         if self.alert_sound:
             threading.Thread(target=self.alert_sound.play, daemon=True).start()
 
 class TimeWindowCounter:
-    """Manages a time-based counter with a rolling window"""
+    """Manages time-based counter with rolling window"""
+    
     def __init__(self, time_window_seconds: int = 10):
         self.time_window = time_window_seconds
-        self.detection_history = deque()  # Stores (timestamp, class_name) tuples
+        self.detection_history = deque()
         self.current_counts = Counter()
     
     def add_detection(self, class_name: str):
-        """Add a detection to the history and update counts"""
+        """Add detection to history"""
         current_time = time.time()
         self.detection_history.append((current_time, class_name))
         self.current_counts[class_name] += 1
-        
-        # Remove old detections outside the time window
         self._prune_old_detections(current_time)
     
     def _prune_old_detections(self, current_time: float):
-        """Remove detections older than the time window"""
-        while self.detection_history and current_time - self.detection_history[0][0] > self.time_window:
+        """Remove old detections"""
+        while (self.detection_history and 
+               current_time - self.detection_history[0][0] > self.time_window):
             old_time, old_class = self.detection_history.popleft()
             self.current_counts[old_class] -= 1
             
-            # Remove zero counts to keep the counter clean
             if self.current_counts[old_class] <= 0:
                 del self.current_counts[old_class]
     
     def get_counts(self) -> Counter:
-        """Get current counts within the time window"""
-        current_time = time.time()
-        self._prune_old_detections(current_time)
+        """Get current counts"""
+        self._prune_old_detections(time.time())
         return self.current_counts.copy()
     
     def get_time_remaining(self) -> float:
-        """Get time until the next counter update (oldest detection expires)"""
+        """Get time until next counter update"""
         if not self.detection_history:
             return self.time_window
         
         current_time = time.time()
         oldest_time = self.detection_history[0][0]
-        time_elapsed = current_time - oldest_time
-        return max(0, self.time_window - time_elapsed)    
+        return max(0, self.time_window - (current_time - oldest_time))
 
 class DetectionVisualizer:
-    """Handles visualization of detection results including segmentation masks"""
+    """Handles visualization of detection results"""
+    
     def __init__(self, config: AppConfig):
         self.config = config
         self.line_height = 22
         self.padding = 8
     
-    def draw_mask(self, frame, mask, color):
-        """Draw a segmentation mask on the frame with transparency"""
-        # Create a colored mask
+    def draw_mask(self, frame: np.ndarray, mask: np.ndarray, color: Tuple[int, int, int]):
+        """Draw segmentation mask"""
         colored_mask = np.zeros_like(frame)
         colored_mask[:] = color
         
-        # Apply the mask with transparency
-        mask = mask.astype(bool)
-        frame[mask] = cv2.addWeighted(frame[mask], 1 - self.config.mask_alpha, 
-                                     colored_mask[mask], self.config.mask_alpha, 0)
+        mask_bool = mask.astype(bool)
+        frame[mask_bool] = cv2.addWeighted(
+            frame[mask_bool], 1 - self.config.mask_alpha,
+            colored_mask[mask_bool], self.config.mask_alpha, 0
+        )
     
-    def draw_detection(self, frame, box, mask, class_name, conf, cls_id, is_conditional=False, conditional_type=None):
-        """Draw a single detection with optional bounding box and mask"""
-        x1, y1, x2, y2 = map(int, box.xyxy[0])
+    def draw_detection(self, frame: np.ndarray, detection: DetectionResult, 
+                      is_conditional: bool = False, conditional_type: Optional[str] = None):
+        """Draw single detection"""
+        x1, y1, x2, y2 = map(int, detection.box.xyxy[0])
         
-        # Choose color based on whether this is a conditional box
+        # Choose color
         if is_conditional:
-            if conditional_type == "all_three":
-                color = self.config.conditional_box_colors["all_three"]
-            elif conditional_type == "two_classes":
-                color = self.config.conditional_box_colors["two_classes"]
-            elif conditional_type == "sequential_complete":
-                color = self.config.conditional_box_colors["sequential_complete"]
-            else:
-                color = (255, 255, 255)  # Default white
+            color = self.config.conditional_box_colors.get(conditional_type, (255, 255, 255))
         else:
-            color = self.config.class_color_map.get(cls_id, (255, 255, 255))
+            color = self.config.class_color_map.get(detection.class_id, (255, 255, 255))
         
-        # Draw segmentation mask if available and enabled
-        if mask is not None and self.config.draw_masks:
-            self.draw_mask(frame, mask, color)
+        # Draw mask
+        if detection.mask is not None and self.config.draw_masks:
+            self.draw_mask(frame, detection.mask, color)
         
-        # Draw bounding box if enabled
+        # Draw bounding box
         if self.config.draw_boxes:
-            # Draw bounding box with different thickness for conditional boxes
             thickness = 4 if is_conditional else 2
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
             
-            # Only draw individual labels for non-conditional boxes
             if not is_conditional:
-                # Create label
-                label = f"{class_name} {conf:.2f}"
-                (text_width, text_height), _ = cv2.getTextSize(
-                    label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2
-                )
-                
-                # Draw label background
-                cv2.rectangle(
-                    frame, 
-                    (x1, y1 - text_height - 10), 
-                    (x1 + text_width, y1), 
-                    color, 
-                    -1
-                )
-                
-                # Draw label text
-                cv2.putText(
-                    frame, 
-                    label, 
-                    (x1, y1 - 5), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 
-                    0.7, 
-                    (0, 0, 0), 
-                    2
-                )
-        
-        return class_name
+                self._draw_label(frame, x1, y1, detection.class_name, detection.confidence, color)
     
-    def draw_conditional_bounding_box(self, frame, boxes, masks, conditional_type):
-        """Draw a special bounding box that encompasses all special class detections"""
-        if not boxes:
+    def _draw_label(self, frame: np.ndarray, x: int, y: int, class_name: str, 
+                   confidence: float, color: Tuple[int, int, int]):
+        """Draw label for detection"""
+        label = f"{class_name} {confidence:.2f}"
+        (text_width, text_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+        
+        # Label background
+        cv2.rectangle(frame, (x, y - text_height - 10), 
+                     (x + text_width, y), color, -1)
+        
+        # Label text
+        cv2.putText(frame, label, (x, y - 5), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+    
+    def draw_combined_detection(self, frame: np.ndarray, detections: List[DetectionResult], 
+                               conditional_type: str):
+        """Draw combined bounding box for multiple detections"""
+        if not detections:
             return
         
-        # Calculate the combined bounding box that contains all special detections
+        # Calculate combined bounding box
+        boxes = [detection.box for detection in detections]
         x1 = min(int(box.xyxy[0][0]) for box in boxes)
         y1 = min(int(box.xyxy[0][1]) for box in boxes)
         x2 = max(int(box.xyxy[0][2]) for box in boxes)
         y2 = max(int(box.xyxy[0][3]) for box in boxes)
         
-        # Add some padding to the combined box
+        # Add padding
         padding = 10
         x1 = max(0, x1 - padding)
         y1 = max(0, y1 - padding)
         x2 = min(frame.shape[1], x2 + padding)
         y2 = min(frame.shape[0], y2 + padding)
         
-        # Choose color and label based on conditional type
-        if conditional_type == "all_three":
-            color = self.config.conditional_box_colors["all_three"]
-            label = "ALL THREE CLASSES"
-        elif conditional_type == "two_classes":
-            color = self.config.conditional_box_colors["two_classes"]
-            label = "TWO SPECIAL CLASSES"
-        else:  # sequential_complete
-            color = self.config.conditional_box_colors["sequential_complete"]
-            label = "SEQUENCE COMPLETE"
+        color = self.config.conditional_box_colors.get(conditional_type, (255, 255, 255))
+        labels = {
+            "all_three": "ALL THREE CLASSES",
+            "two_classes": "TWO SPECIAL CLASSES", 
+            "sequential_complete": "SEQUENCE COMPLETE"
+        }
+        label = labels.get(conditional_type, "COMBINED DETECTION")
         
-        # Draw the combined bounding box if enabled
         if self.config.draw_boxes:
+            # Draw box
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 4)
             
-            # Draw label for the combined box
-            (text_width, text_height), _ = cv2.getTextSize(
-                label, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 3
-            )
-            
-            # Draw label background
-            cv2.rectangle(
-                frame, 
-                (x1, y1 - text_height - 15), 
-                (x1 + text_width + 10, y1), 
-                color, 
-                -1
-            )
-            
-            # Draw label text
-            cv2.putText(
-                frame, 
-                label, 
-                (x1 + 5, y1 - 5), 
-                cv2.FONT_HERSHEY_SIMPLEX, 
-                0.9, 
-                (0, 0, 0), 
-                3
-            )
+            # Draw label
+            (text_width, text_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 3)
+            cv2.rectangle(frame, (x1, y1 - text_height - 15),
+                         (x1 + text_width + 10, y1), color, -1)
+            cv2.putText(frame, label, (x1 + 5, y1 - 5),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 3)
         
-        # Draw combined masks if enabled
-        if self.config.draw_masks and masks:
+        # Draw combined masks
+        if self.config.draw_masks:
             combined_mask = np.zeros((frame.shape[0], frame.shape[1]), dtype=bool)
-            for mask in masks:
-                if mask is not None:
-                    combined_mask = np.logical_or(combined_mask, mask.astype(bool))
-            
+            for detection in detections:
+                if detection.mask is not None:
+                    combined_mask = np.logical_or(combined_mask, detection.mask.astype(bool))
             self.draw_mask(frame, combined_mask, color)
     
-    def draw_text_panel(self, frame, lines, x0=10, y0=30, panel_w=250, right_align=False):
-        """Draw a semi-transparent text panel with information"""
-        panel_h = self.line_height * len(lines) + self.padding
+    def draw_info_panel(self, frame: np.ndarray, frame_counts: Counter, 
+                       time_window_counter: TimeWindowCounter, alert_manager: AlertManager,
+                       sequential_memory: SequentialMemory, is_connected: bool, 
+                       failure_count: int):
+        """Draw all information panels on the frame"""
+        # Resize frame for display
+        frame = cv2.resize(frame, (self.config.display_width, self.config.display_height))
         
-        # Adjust x position if right-aligned
+        # Draw counter panel
+        self._draw_counter_panel(frame, frame_counts, time_window_counter)
+        
+        # Draw cooldown status
+        self._draw_cooldown_status(frame, alert_manager)
+        
+        # Draw connection status
+        self._draw_connection_status(frame, is_connected, failure_count)
+        
+        # Draw sequential memory status
+        self._draw_sequential_status(frame, sequential_memory)
+        
+        return frame
+    
+    def _draw_counter_panel(self, frame: np.ndarray, frame_counts: Counter, 
+                           time_window_counter: TimeWindowCounter):
+        """Draw counter information panel"""
+        lines = ["Counts (frame):"]
+        if frame_counts:
+            for name, cnt in frame_counts.items():
+                lines.append(f"{name}: {cnt}")
+        else:
+            lines.append("None")
+            
+        lines.append("")
+        lines.append(f"Last {time_window_counter.time_window}s:")
+        time_counts = time_window_counter.get_counts()
+        if time_counts:
+            for name, cnt in time_counts.items():
+                lines.append(f"{name}: {cnt}")
+        else:
+            lines.append("None")
+            
+        lines.append(f"Reset in: {time_window_counter.get_time_remaining():.1f}s")
+        
+        self._draw_text_panel(frame, lines, 10, 30, 250, right_align=True)
+    
+    def _draw_cooldown_status(self, frame: np.ndarray, alert_manager: AlertManager):
+        """Draw alert cooldown status"""
+        current_time = time.time()
+        for i, (cls_id, last_alert) in enumerate(alert_manager.alert_timers.items()):
+            time_remaining = max(0, alert_manager.config.alert_cooldown - (current_time - last_alert))
+            status_text = f"Class {cls_id} alert: {time_remaining:.1f}s cooldown"
+            cv2.putText(frame, status_text, (10, 30 + i*30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+    
+    def _draw_connection_status(self, frame: np.ndarray, is_connected: bool, failure_count: int):
+        """Draw connection status"""
+        status_text = "Connected" if is_connected else f"Disconnected ({failure_count})"
+        color = (0, 255, 0) if is_connected else (0, 0, 255)
+        cv2.putText(frame, f"Status: {status_text}", (10, frame.shape[0] - 20),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+    
+    def _draw_sequential_status(self, frame: np.ndarray, sequential_memory: SequentialMemory):
+        """Draw sequential detection status"""
+        memory_classes = sequential_memory.get_sequence_classes()
+        memory_text = f"Memory: {sorted(memory_classes)}"
+        cv2.putText(frame, memory_text, (10, frame.shape[0] - 50),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    
+    def _draw_text_panel(self, frame: np.ndarray, lines: List[str], x0: int, y0: int, 
+                        panel_w: int, right_align: bool = False):
+        """Draw semi-transparent text panel"""
         if right_align:
             x0 = frame.shape[1] - panel_w - x0
         
-        # Draw semi-transparent background
+        panel_h = self.line_height * len(lines) + self.padding
+        
+        # Semi-transparent background
         overlay = frame.copy()
-        cv2.rectangle(
-            overlay, 
-            (x0 - self.padding//2, y0 - self.line_height),
-            (x0 + panel_w, y0 - self.line_height + panel_h), 
-            (0, 0, 0), 
-            -1
-        )
+        cv2.rectangle(overlay, (x0 - self.padding//2, y0 - self.line_height),
+                     (x0 + panel_w, y0 - self.line_height + panel_h), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
         
-        # Draw text lines
+        # Draw text
         y = y0
         for line in lines:
-            cv2.putText(
-                frame, line, (x0, y),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1
-            )
+            cv2.putText(frame, line, (x0, y),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
             y += self.line_height
     
-    def draw_cooldown_status(self, frame, alert_manager):
-        """Display cooldown status for each class in top-left"""
-        current_time = time.time()
-        for i, (cls_id, last_alert) in enumerate(alert_manager.alert_timers.items()):
-            time_remaining = max(0, self.config.alert_cooldown - (current_time - last_alert))
-            status_text = f"Class {cls_id} alert: {time_remaining:.1f}s cooldown"
-            cv2.putText(
-                frame, status_text, (10, 30 + i*30), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2
-            )
-    
-    def draw_connection_status(self, frame, is_connected, failure_count):
-        """Display connection status"""
-        status_text = "Connected" if is_connected else f"Disconnected ({failure_count})"
-        color = (0, 255, 0) if is_connected else (0, 0, 255)
-        cv2.putText(
-            frame, f"Status: {status_text}", (10, frame.shape[0] - 20),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2
-        )
-    
-    def draw_error_message(self, frame, message):
-        """Display error message on the frame"""
-        # Create a semi-transparent background
+    def draw_error_message(self, frame: np.ndarray, message: str):
+        """Display error message"""
         overlay = frame.copy()
         cv2.rectangle(overlay, (0, 0), (frame.shape[1], frame.shape[0]), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
         
-        # Add error text
         text_lines = message.split('\n')
         y_pos = frame.shape[0] // 2 - (len(text_lines) * 30) // 2
         
@@ -394,318 +586,241 @@ class DetectionVisualizer:
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             y_pos += 40
 
-class ObjectDetector:
-    """Main class for object detection workflow with segmentation support"""
-    def __init__(self, config: AppConfig):
+class DetectionProcessor:
+    """Processes detections and applies business logic"""
+    
+    def __init__(self, config: AppConfig, model: IModel, sequential_memory: SequentialMemory):
         self.config = config
-        
-        self.sequential_memory = SequentialMemory(sequence_timeout=5.0)  # 5-second sequence window
-
-        # Load the segmentation model
-        try:
-            self.model = YOLO(str(config.model_path), task='segment')
-            print("Segmentation model loaded successfully")
-        except Exception as e:
-            print(f"Error loading model: {e}")
-            raise
-        
-        self.cap = None
-        self.alert_manager = AlertManager(config)
-        self.visualizer = DetectionVisualizer(config)
-        self.time_window_counter = TimeWindowCounter(config.counter_time_window)
-        self.consecutive_failures = 0
-        
-        # Initialize video source
-        self.setup_video_source()
+        self.model = model
+        self.sequential_memory = sequential_memory
     
-    def setup_video_source(self):
-        """Initialize and configure the video source (camera or RTSP)"""
-        if self.cap is not None:
-            self.cap.release()
-            
-        try:
-            # Convert camera index to int if it's a numeric string
-            if isinstance(self.config.camera_source, str) and self.config.camera_source.isdigit():
-                camera_source = int(self.config.camera_source)
-            else:
-                camera_source = self.config.camera_source
-                
-            self.cap = cv2.VideoCapture(camera_source)
-            
-            # Set RTSP parameters for better stability if using RTSP
-            if isinstance(camera_source, str) and "rtsp" in camera_source.lower():
-                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                self.cap.set(cv2.CAP_PROP_FPS, 30)
-            
-            # Set resolution if specified
-            if self.config.frame_width > 0:
-                self.cap.set(3, self.config.frame_width)
-            if self.config.frame_height > 0:
-                self.cap.set(4, self.config.frame_height)
-            
-            # Test if we can read a frame
-            if not self.cap.isOpened():
-                return False
-                
-            # Try to read a frame to verify the camera works
-            ret, frame = self.cap.read()
-            if not ret:
-                return False
-                
-            return True
-            
-        except Exception as e:
-            print(f"Error setting up video source: {e}")
-            return False
-    
-    def process_frame(self, frame):
-        """Process a single frame for object detection with segmentation"""
+    def process_detections(self, frame: np.ndarray, alert_manager: AlertManager, 
+                          time_window_counter: TimeWindowCounter) -> Tuple[Counter, List[DetectionResult]]:
+        """Process frame and return detection results"""
         frame_counts = Counter()
-        special_detections = []  # Store special class detections for conditional processing
-        current_frame_classes = set()  # Track classes in current frame
+        special_detections = []
+        current_frame_classes = set()
         
-        # Run inference
-        results = self.model(frame, stream=True, verbose=False)
+        # Run model inference
+        detections = self.model.predict(frame)
         
-        for r in results:
-            # Process detections with both boxes and masks
-            if r.boxes is not None and len(r.boxes) > 0:
-                for i, box in enumerate(r.boxes):
-                    conf = float(box.conf[0])
-                    cls_id = int(box.cls[0])
-                    
-                    if conf > self.config.confidence_threshold:
-                        class_name = self.model.names[cls_id]
-                        
-                        # Get the corresponding mask if available
-                        mask = None
-                        if r.masks is not None and i < len(r.masks):
-                            mask = r.masks[i].data[0].cpu().numpy()
-                            # Resize mask to original frame size
-                            mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]))
-                        
-                        # Check for alert
-                        if cls_id in self.config.class_cooldowns and self.alert_manager.should_trigger_alert(cls_id):
-                            self.alert_manager.play_alert()
-                        
-                        # Count the detection
-                        frame_counts[class_name] += 1
-                        
-                        # Add to time window counter
-                        self.time_window_counter.add_detection(class_name)
-                        
-                        # Track current frame classes
-                        current_frame_classes.add(cls_id)
-                        
-                        # Check if this is a special class
-                        if cls_id in self.config.special_classes:
-                            special_detections.append((box, mask, cls_id, conf, class_name))
-                            # Add to sequential memory
-                            self.sequential_memory.add_detection(cls_id)
-                        else:
-                            # Draw non-special classes immediately
-                            self.visualizer.draw_detection(frame, box, mask, class_name, conf, cls_id)
-        
-        # Apply sequential logic after processing all detections
-        sequential_condition_met = self._apply_sequential_logic(frame, current_frame_classes, special_detections)
-        
-        # Only apply original conditional logic if sequential condition is not met
-        if not sequential_condition_met:
-            # Process special class detections for conditional labeling
-            special_class_ids = set(cls_id for _, _, cls_id, _, _ in special_detections)
+        for detection in detections:
+            # Update counters
+            frame_counts[detection.class_name] += 1
+            time_window_counter.add_detection(detection.class_name)
+            current_frame_classes.add(detection.class_id)
             
-            # Check for conditional cases
-            if special_class_ids == set(self.config.special_classes):
-                # All three special classes detected
-                special_boxes = [box for box, _, _, _, _ in special_detections]
-                special_masks = [mask for _, mask, _, _, _ in special_detections]
-                self.visualizer.draw_conditional_bounding_box(frame, special_boxes, special_masks, "all_three")
-            elif len(special_class_ids) == 2:
-                # Exactly two special classes detected
-                special_boxes = [box for box, _, _, _, _ in special_detections]
-                special_masks = [mask for _, mask, _, _, _ in special_detections]
-                self.visualizer.draw_conditional_bounding_box(frame, special_boxes, special_masks, "two_classes")
-            else:
-                # Draw special classes individually if no condition met
-                for box, mask, cls_id, conf, class_name in special_detections:
-                    self.visualizer.draw_detection(frame, box, mask, class_name, conf, cls_id)
-        
-        # Get time window counts
-        time_window_counts = self.time_window_counter.get_counts()
-        time_remaining = self.time_window_counter.get_time_remaining()
-        
-        # Prepare and display counts panel in top-right corner
-        lines = ["Counts (frame):"]
-        if frame_counts:
-            for name, cnt in frame_counts.items():
-                lines.append(f"{name}: {cnt}")
-        else:
-            lines.append("None")
+            # Check for alerts
+            if (detection.class_id in self.config.class_cooldowns and 
+                alert_manager.should_trigger_alert(detection.class_id)):
+                alert_manager.play_alert()
             
-        lines.append("")
-        lines.append(f"Last {self.config.counter_time_window}s:")
-        if time_window_counts:
-            for name, cnt in time_window_counts.items():
-                lines.append(f"{name}: {cnt}")
-        else:
-            lines.append("None")
-            
-        lines.append(f"Reset in: {time_remaining:.1f}s")
-            
-        # Draw counter panel in top-right corner
-        self.visualizer.draw_text_panel(frame, lines, 10, 30, 250, right_align=True)
+            # Track special classes
+            if detection.class_id in self.config.special_classes:
+                special_detections.append(detection)
+                self.sequential_memory.add_detection(detection.class_id)
         
-        # Display cooldown status in top-left corner
-        self.visualizer.draw_cooldown_status(frame, self.alert_manager)
-        
-        # Display connection status
-        is_connected = self.cap.isOpened() and self.consecutive_failures < self.config.max_consecutive_failures
-        self.visualizer.draw_connection_status(frame, is_connected, self.consecutive_failures)
+        return frame_counts, special_detections, current_frame_classes
 
-        # Display sequential memory status
-        memory_classes = self.sequential_memory.get_sequence_classes()
-        memory_text = f"Memory: {sorted(memory_classes)}"
-        cv2.putText(frame, memory_text, (10, frame.shape[0] - 50),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-        # Resize the frame 
-        frame = cv2.resize(frame, (1024, 576))  # Change this to resize the window
-        
-        return frame
+class ConditionalLogicProcessor:
+    """Handles conditional detection logic"""
     
-    def _apply_sequential_logic(self, frame, current_frame_classes, special_detections):
-        """Apply sequential detection logic - returns True if sequential condition was met"""
-        # Check if we have Class 3 in current frame
+    def __init__(self, config: AppConfig, sequential_memory: SequentialMemory):
+        self.config = config
+        self.sequential_memory = sequential_memory
+    
+    def apply_conditional_logic(self, frame: np.ndarray, special_detections: List[DetectionResult],
+                              current_frame_classes: Set[int], visualizer: DetectionVisualizer) -> bool:
+        """Apply conditional logic and return True if sequential condition was met"""
+        # Check sequential logic first
+        if self._apply_sequential_logic(frame, special_detections, current_frame_classes, visualizer):
+            return True
+        
+        # Apply standard conditional logic
+        special_class_ids = {detection.class_id for detection in special_detections}
+        
+        if special_class_ids == set(self.config.special_classes):
+            visualizer.draw_combined_detection(frame, special_detections, "all_three")
+        elif len(special_class_ids) == 2:
+            visualizer.draw_combined_detection(frame, special_detections, "two_classes")
+        else:
+            # Draw individual detections
+            for detection in special_detections:
+                visualizer.draw_detection(frame, detection)
+        
+        return False
+    
+    def _apply_sequential_logic(self, frame: np.ndarray, special_detections: List[DetectionResult],
+                              current_frame_classes: Set[int], visualizer: DetectionVisualizer) -> bool:
+        """Apply sequential detection logic"""
         class3_id = 2  # Assuming class 3 is ID 2
+        
         if class3_id not in current_frame_classes:
             return False
         
-        # Check if Class 1 and 2 are in memory but not necessarily in current frame
         memory_classes = self.sequential_memory.get_sequence_classes()
         class1_in_memory = 0 in memory_classes
         class2_in_memory = 1 in memory_classes
         
-        # Condition: Class 3 present, and Class 1 & 2 are in memory (current or previous frames)
         if class1_in_memory and class2_in_memory:
-            # All three classes are present in the sequence (current frame + memory)
-            special_boxes = [box for box, _, _, _, _ in special_detections]
-            special_masks = [mask for _, mask, _, _, _ in special_detections]
-            self.visualizer.draw_conditional_bounding_box(
-                frame, special_boxes, special_masks, "sequential_complete"
-            )
-            print("SEQUENCE COMPLETE: Class 1, 2, 3 detected in sequence!")
+            visualizer.draw_combined_detection(frame, special_detections, "sequential_complete")
+            logger.info("SEQUENCE COMPLETE: Class 1, 2, 3 detected in sequence!")
             return True
         
-        return False    
+        return False
+
+class ObjectDetectorApp:
+    """Main application class"""
+    
+    def __init__(self, config: AppConfig):
+        self.config = config
+        self.video_source = VideoSourceFactory.create_video_source(config)
+        self.model = YOLOModel(config)
+        self.sequential_memory = SequentialMemory()
+        self.alert_manager = AlertManager(config)
+        self.visualizer = DetectionVisualizer(config)
+        self.time_window_counter = TimeWindowCounter(config.counter_time_window)
+        self.detection_processor = DetectionProcessor(config, self.model, self.sequential_memory)
+        self.conditional_processor = ConditionalLogicProcessor(config, self.sequential_memory)
+        
+        self.consecutive_failures = 0
+        self.is_running = False
     
     def run(self):
-        """Main application loop with reconnection capability"""
+        """Main application loop"""
+        self.is_running = True
+        blank_frame = None
+        
         try:
-            # Create a blank frame for error display
-            blank_frame = None
-            
-            while True:
-                # Check connection status and reconnect if needed
-                if not self.cap.isOpened() or self.consecutive_failures >= self.config.max_consecutive_failures:
-                    print(f"Attempting to reconnect to video source... (Failures: {self.consecutive_failures})")
-                    try:
-                        if self.setup_video_source():
-                            self.consecutive_failures = 0
-                            print("Reconnection successful")
-                        else:
-                            print(f"Reconnection failed")
-                            time.sleep(self.config.reconnect_delay)
-                            continue
-                    except Exception as e:
-                        print(f"Reconnection error: {e}")
-                        time.sleep(self.config.reconnect_delay)
-                        continue
-                
-                # Read frame
-                ret, frame = self.cap.read()
-                if not ret:
-                    self.consecutive_failures += 1
-                    print(f"Failed to read frame ({self.consecutive_failures}/{self.config.max_consecutive_failures})")
-                    
-                    # Create a blank frame for display if needed
-                    if blank_frame is None:
-                        blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                    
-                    # Show error message
-                    error_msg = f"Cannot read from video source\nFailures: {self.consecutive_failures}/{self.config.max_consecutive_failures}"
-                    self.visualizer.draw_error_message(blank_frame, error_msg)
-                    cv2.imshow('YOLOv8 Live Detection', blank_frame)
-                    
-                    time.sleep(1)
+            while self.is_running:
+                if not self._ensure_connection():
                     continue
                 
-                # Reset failure counter on successful frame read
-                self.consecutive_failures = 0
+                ret, frame = self.video_source.read()
+                if not ret:
+                    self._handle_frame_read_error(blank_frame)
+                    continue
                 
-                # Process frame
-                processed_frame = self.process_frame(frame)
+                self._process_successful_frame(frame)
                 
-                # Display the resulting frame
-                cv2.imshow('YOLOv8 Live Detection', processed_frame)
-                
-                # Exit on 'q' key press
+                # Check for exit key
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
                     
         finally:
-            if self.cap is not None:
-                self.cap.release()
-            cv2.destroyAllWindows()
+            self.cleanup()
+    
+    def _ensure_connection(self) -> bool:
+        """Ensure video source is connected"""
+        if (not self.video_source.is_opened() or 
+            self.consecutive_failures >= self.config.max_consecutive_failures):
+            
+            logger.info(f"Attempting to reconnect... (Failures: {self.consecutive_failures})")
+            if self.video_source.reconnect():
+                self.consecutive_failures = 0
+                logger.info("Reconnection successful")
+            else:
+                logger.error("Reconnection failed")
+                time.sleep(self.config.reconnect_delay)
+                return False
+        return True
+    
+    def _handle_frame_read_error(self, blank_frame: Optional[np.ndarray]):
+        """Handle frame read errors"""
+        self.consecutive_failures += 1
+        logger.warning(f"Frame read failed ({self.consecutive_failures}/{self.config.max_consecutive_failures})")
         
+        if blank_frame is None:
+            blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        
+        error_msg = f"Cannot read from video source\nFailures: {self.consecutive_failures}/{self.config.max_consecutive_failures}"
+        self.visualizer.draw_error_message(blank_frame, error_msg)
+        cv2.imshow('YOLOv8 Live Detection', blank_frame)
+        time.sleep(1)
+    
+    def _process_successful_frame(self, frame: np.ndarray):
+        """Process a successfully read frame"""
+        self.consecutive_failures = 0
+        
+        # Process detections
+        frame_counts, special_detections, current_frame_classes = self.detection_processor.process_detections(
+            frame, self.alert_manager, self.time_window_counter
+        )
+        
+        # Apply conditional logic
+        self.conditional_processor.apply_conditional_logic(
+            frame, special_detections, current_frame_classes, self.visualizer
+        )
+        
+        # Draw information and display
+        processed_frame = self.visualizer.draw_info_panel(
+            frame, frame_counts, self.time_window_counter, self.alert_manager,
+            self.sequential_memory, True, self.consecutive_failures
+        )
+        
+        cv2.imshow('YOLOv8 Live Detection', processed_frame)
+    
+    def stop(self):
+        """Stop the application"""
+        self.is_running = False
+    
+    def cleanup(self):
+        """Clean up resources"""
+        self.video_source.release()
+        cv2.destroyAllWindows()
+
 def main():
     """Main function to initialize and run the application"""
-    # Configuration - change only these values to modify application behavior
-    
-    # For webcam (default)
+    # Try different camera indices
     camera_source = 1
-    
-    # For RTSP stream (uncomment and modify as needed)
-    #camera_source = "rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/501"
-    
-    # Try different camera indices if 0 doesn't work
     for camera_idx in [1, 2]:
         try:
             test_cap = cv2.VideoCapture(camera_idx)
             if test_cap.isOpened():
-                print(f"Found camera at index {camera_idx}")
+                logger.info(f"Found camera at index {camera_idx}")
                 test_cap.release()
                 camera_source = camera_idx
                 break
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"Camera test failed for index {camera_idx}: {e}")
     
     config = AppConfig(
         model_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\Segmentation1.torchscript"),
-        camera_source=camera_source,  # Use 0 for webcam or RTSP URL for stream
+        camera_source=camera_source,
         frame_width=640,
         frame_height=480,
         confidence_threshold=0.5,
-        class_color_map={1: (0, 0, 255), 0: (0, 235, 0), 2:(0, 0, 255)},  # Red, Green
+        class_color_map={1: (0, 0, 255), 0: (0, 235, 0), 2: (0, 0, 255)},
         alert_sound_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3"),
         alert_cooldown=5,
         class_cooldowns={0: 15, 1: 5, 2: 15},
-        counter_time_window=10,  # 10-second time window for counter
-        reconnect_delay=5,  # Seconds between reconnection attempts
-        max_consecutive_failures=3,  # Maximum failures before attempting reconnection
-        special_classes=(0, 1, 2),  # Classes to check for conditional labeling
+        counter_time_window=10,
+        reconnect_delay=5,
+        max_consecutive_failures=3,
+        special_classes=(0, 1, 2),
         conditional_box_colors={
-            "all_three": (0, 255, 255),  # Yellow for all three classes
-            "two_classes": (255, 0, 255),  # Magenta for two classes
-            "sequential_complete": (0, 255, 0) # Green - sequential detection
+            "all_three": (0, 255, 255),
+            "two_classes": (255, 0, 255),
+            "sequential_complete": (0, 255, 0)
         },
-        mask_alpha=0.5,  # Transparency for segmentation masks
-        draw_masks=True,  # Draw segmentation masks
-        draw_boxes=True   # Draw bounding boxes
+        mask_alpha=0.5,
+        draw_masks=True,
+        draw_boxes=True,
+        display_width=1024,
+        display_height=576
     )
     
-    # Create and run the detector
-    detector = ObjectDetector(config)
-    detector.run()
+    # Create and run the application
+    app = ObjectDetectorApp(config)
+    
+    try:
+        app.run()
+    except KeyboardInterrupt:
+        logger.info("Application interrupted by user")
+    except Exception as e:
+        logger.error(f"Application error: {e}")
+    finally:
+        app.cleanup()
 
 if __name__ == "__main__":
     main()

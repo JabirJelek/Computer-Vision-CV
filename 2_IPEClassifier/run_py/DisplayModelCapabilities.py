@@ -16,7 +16,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("object_detection.log"),
+        logging.FileHandler("DisplayModelCapabilites.log"),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -60,7 +60,7 @@ class AppConfig:
     def __post_init__(self):
         # Initialize default values for mutable objects
         if self.model_paths is None:
-            self.model_paths = [Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestIPE-2.torchscript")]
+            self.model_paths = [Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect.torchscript")]
             
         if self.class_color_map is None:
             self.class_color_map = {0: (0, 0, 255), 1: (0, 255, 0)}
@@ -788,7 +788,7 @@ def main():
         #camera_source = "rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/501"
         
         # Try different camera indices if 0 doesn't work
-        for camera_idx in [0, 1, 2]:
+        for camera_idx in [1, 2]:
             try:
                 test_cap = cv2.VideoCapture(camera_idx)
                 if test_cap.isOpened():
@@ -801,7 +801,7 @@ def main():
         
         # Define multiple models with fallback - first one is preferred
         model_configs = [
-            Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\IPE1.torchscript"),  # Primary detection model
+            Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect.torchscript"),  # Primary detection model
             #Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\segmentation_model.pt"),  # Fallback segmentation model
             #Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\backup_detection_model.pt"),  # Backup detection model
         ]

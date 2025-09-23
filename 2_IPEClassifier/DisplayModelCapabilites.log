@@ -1,0 +1,20 @@
+2025-09-23 10:09:00,398 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect.torchscript
+2025-09-23 10:09:00,402 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect.torchscript
+2025-09-23 10:09:01,904 - INFO - Video source initialized: 0
+2025-09-23 10:09:01,905 - INFO - ObjectDetector initialized successfully
+2025-09-23 10:09:05,710 - INFO - Application shut down successfully
+2025-09-23 10:09:34,795 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect.torchscript
+2025-09-23 10:09:34,798 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect.torchscript
+2025-09-23 10:09:36,224 - INFO - Video source initialized: 0
+2025-09-23 10:09:36,224 - INFO - ObjectDetector initialized successfully
+2025-09-23 10:09:39,049 - INFO - Application shut down successfully
+2025-09-23 10:09:48,589 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect.torchscript
+2025-09-23 10:09:48,594 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect.torchscript
+2025-09-23 10:09:51,347 - INFO - Video source initialized: 1
+2025-09-23 10:09:51,348 - INFO - ObjectDetector initialized successfully
+2025-09-23 10:10:13,548 - INFO - Application shut down successfully
+2025-09-23 10:23:15,212 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect.torchscript
+2025-09-23 10:23:15,218 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect.torchscript
+2025-09-23 10:23:16,511 - INFO - Video source initialized: 1
+2025-09-23 10:23:16,512 - INFO - ObjectDetector initialized successfully
+2025-09-23 10:23:28,593 - INFO - Application shut down successfully
