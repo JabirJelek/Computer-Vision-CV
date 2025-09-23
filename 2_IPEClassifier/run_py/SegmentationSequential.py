@@ -70,6 +70,63 @@ class AppConfig:
                 "sequential_complete": (0, 255, 0)
             }
 
+class TemporalMemory:
+    """Stores class detection states with time-based expiration"""
+    
+    def __init__(self, time_window: float = 15.0):
+        self.time_window = time_window
+        self.class_states = {}  # class_id -> last_detection_time
+        self.class_presence = {}  # class_id -> is_active_until
+    
+    def update_detection(self, class_id: int, current_time: float):
+        """Update detection time for a class"""
+        self.class_states[class_id] = current_time
+        self.class_presence[class_id] = current_time + self.time_window
+    
+    def is_class_active(self, class_id: int, current_time: float) -> bool:
+        """Check if class was detected within time window"""
+        if class_id not in self.class_presence:
+            return False
+        return current_time <= self.class_presence[class_id]
+    
+    def get_active_classes(self, current_time: float) -> Set[int]:
+        """Get all classes active within time window"""
+        self._cleanup_expired(current_time)
+        return set(self.class_presence.keys())
+    
+    def _cleanup_expired(self, current_time: float):
+        """Remove expired class states"""
+        expired = [cls_id for cls_id, expiry in self.class_presence.items() 
+                  if current_time > expiry]
+        for cls_id in expired:
+            self.class_presence.pop(cls_id, None)
+            self.class_states.pop(cls_id, None)
+
+class EnhancedSequentialLogic:
+    def __init__(self, config: AppConfig, temporal_memory: TemporalMemory):
+        self.config = config
+        self.temporal_memory = temporal_memory
+    
+    def check_enhanced_sequence(self, current_frame_classes: Set[int], 
+                              current_time: float) -> Dict[str, bool]:
+        """Check various sequence conditions using temporal memory"""
+        
+        # Get all classes active in time window (current + recent)
+        all_active_classes = self.temporal_memory.get_active_classes(current_time)
+        
+        conditions = {
+            "all_three_current": current_frame_classes == set(self.config.special_classes),
+            "all_three_temporal": all_active_classes == set(self.config.special_classes),
+            "sequential_complete": self._check_sequential_complete(all_active_classes),
+            "any_two_temporal": len(all_active_classes) >= 2
+        }
+        
+        return conditions
+    
+    def _check_sequential_complete(self, active_classes: Set[int]) -> bool:
+        """Check if required sequence is present in temporal memory"""
+        return active_classes.issuperset(set(self.config.special_classes))
+
 class IVideoSource(ABC):
     """Abstract interface for video sources"""
     
@@ -589,10 +646,11 @@ class DetectionVisualizer:
 class DetectionProcessor:
     """Processes detections and applies business logic"""
     
-    def __init__(self, config: AppConfig, model: IModel, sequential_memory: SequentialMemory):
+    def __init__(self, config: AppConfig, model: IModel, sequential_memory: SequentialMemory, temporal_memory: TemporalMemory):
         self.config = config
         self.model = model
         self.sequential_memory = sequential_memory
+        self.temporal_memory = temporal_memory  # Add this line
     
     def process_detections(self, frame: np.ndarray, alert_manager: AlertManager, 
                           time_window_counter: TimeWindowCounter) -> Tuple[Counter, List[DetectionResult]]:
@@ -603,12 +661,16 @@ class DetectionProcessor:
         
         # Run model inference
         detections = self.model.predict(frame)
+        current_time = time.time()  # Get current time
         
         for detection in detections:
             # Update counters
             frame_counts[detection.class_name] += 1
             time_window_counter.add_detection(detection.class_name)
             current_frame_classes.add(detection.class_id)
+            
+            # Update temporal memory
+            self.temporal_memory.update_detection(detection.class_id, current_time)  # Add this line
             
             # Check for alerts
             if (detection.class_id in self.config.class_cooldowns and 
@@ -622,52 +684,54 @@ class DetectionProcessor:
         
         return frame_counts, special_detections, current_frame_classes
 
-class ConditionalLogicProcessor:
-    """Handles conditional detection logic"""
+class EnhancedConditionalLogicProcessor:
+    """Handles conditional detection logic with temporal memory"""
     
-    def __init__(self, config: AppConfig, sequential_memory: SequentialMemory):
+    def __init__(self, config: AppConfig, sequential_memory: SequentialMemory, temporal_memory: TemporalMemory):
         self.config = config
         self.sequential_memory = sequential_memory
+        self.temporal_memory = temporal_memory
     
     def apply_conditional_logic(self, frame: np.ndarray, special_detections: List[DetectionResult],
                               current_frame_classes: Set[int], visualizer: DetectionVisualizer) -> bool:
-        """Apply conditional logic and return True if sequential condition was met"""
-        # Check sequential logic first
-        if self._apply_sequential_logic(frame, special_detections, current_frame_classes, visualizer):
-            return True
+        """Apply conditional logic using temporal memory"""
+        current_time = time.time()
         
-        # Apply standard conditional logic
-        special_class_ids = {detection.class_id for detection in special_detections}
+        # Get all classes active in time window (current + recent)
+        all_active_classes = self.temporal_memory.get_active_classes(current_time)
         
-        if special_class_ids == set(self.config.special_classes):
+        # Check various conditions
+        if all_active_classes == set(self.config.special_classes):
+            # All three classes detected within time window (not necessarily same frame)
             visualizer.draw_combined_detection(frame, special_detections, "all_three")
-        elif len(special_class_ids) == 2:
+            logger.info("TEMPORAL CONDITION: All three classes active in time window!")
+            return True
+            
+        elif len(all_active_classes) == 2:
+            # Any two special classes active in time window
             visualizer.draw_combined_detection(frame, special_detections, "two_classes")
+            return True
+            
+        elif self._check_sequential_complete(all_active_classes, current_time):
+            # Sequential logic using temporal memory
+            visualizer.draw_combined_detection(frame, special_detections, "sequential_complete")
+            logger.info("SEQUENCE COMPLETE: Classes detected in sequence within time window!")
+            return True
         else:
             # Draw individual detections
             for detection in special_detections:
                 visualizer.draw_detection(frame, detection)
-        
-        return False
+            return False
     
-    def _apply_sequential_logic(self, frame: np.ndarray, special_detections: List[DetectionResult],
-                              current_frame_classes: Set[int], visualizer: DetectionVisualizer) -> bool:
-        """Apply sequential detection logic"""
-        class3_id = 2  # Assuming class 3 is ID 2
-        
-        if class3_id not in current_frame_classes:
+    def _check_sequential_complete(self, active_classes: Set[int], current_time: float) -> bool:
+        """Enhanced sequential check using temporal memory"""
+        # Check if we have all required classes active
+        if not active_classes.issuperset(set(self.config.special_classes)):
             return False
         
-        memory_classes = self.sequential_memory.get_sequence_classes()
-        class1_in_memory = 0 in memory_classes
-        class2_in_memory = 1 in memory_classes
-        
-        if class1_in_memory and class2_in_memory:
-            visualizer.draw_combined_detection(frame, special_detections, "sequential_complete")
-            logger.info("SEQUENCE COMPLETE: Class 1, 2, 3 detected in sequence!")
-            return True
-        
-        return False
+        # Optional: Add timing sequence validation here
+        # For example, check if classes were detected in specific order
+        return True
 
 class ObjectDetectorApp:
     """Main application class"""
@@ -677,11 +741,12 @@ class ObjectDetectorApp:
         self.video_source = VideoSourceFactory.create_video_source(config)
         self.model = YOLOModel(config)
         self.sequential_memory = SequentialMemory()
+        self.temporal_memory = TemporalMemory(time_window=5.0)  # Add this line
         self.alert_manager = AlertManager(config)
         self.visualizer = DetectionVisualizer(config)
         self.time_window_counter = TimeWindowCounter(config.counter_time_window)
-        self.detection_processor = DetectionProcessor(config, self.model, self.sequential_memory)
-        self.conditional_processor = ConditionalLogicProcessor(config, self.sequential_memory)
+        self.detection_processor = DetectionProcessor(config, self.model, self.sequential_memory, self.temporal_memory)  # Update this line
+        self.conditional_processor = EnhancedConditionalLogicProcessor(config, self.sequential_memory, self.temporal_memory)  # Update this line
         
         self.consecutive_failures = 0
         self.is_running = False
