@@ -1,0 +1,2 @@
+1. Link untuk cctv magic araya lt 1: rtsp_url = "rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/105"
+2. Link untuk cctv magic meja meeting lt 3: rtsp_url = "rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/501"
