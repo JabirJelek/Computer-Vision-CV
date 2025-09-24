@@ -53,3 +53,8 @@
 2025-09-23 15:38:45,485 - INFO - Video source initialized: 1
 2025-09-23 15:38:45,486 - INFO - ObjectDetector initialized successfully
 2025-09-23 15:39:05,419 - INFO - Application shut down successfully
+2025-09-24 08:39:47,662 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript
+2025-09-24 08:39:47,667 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript
+2025-09-24 08:39:48,007 - INFO - Video source initialized: 1
+2025-09-24 08:39:48,008 - INFO - ObjectDetector initialized successfully
+2025-09-24 08:40:01,133 - INFO - Application shut down successfully
