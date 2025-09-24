@@ -32,16 +32,16 @@ class AppConfig:
     
     # Updated alert configuration
     alert_sound_path: Path = Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3")
-    combination_alert_sounds: Dict[str, Path] = field(default_factory=dict)  # New: sound files for combinations
+    combination_alert_sounds: Dict[str, Path] = field(default_factory=dict)
     alert_cooldown: int = 5
-    combination_cooldowns: Dict[str, int] = field(default_factory=dict)  # New: cooldowns for combinations
+    combination_cooldowns: Dict[str, int] = field(default_factory=dict)
+    
+    # NEW: Sequential suppression configuration
+    sequential_suppression_time: int = 30  # Seconds to suppress after sequence detection
+    suppression_cooldowns: Dict[str, int] = field(default_factory=dict)  # Individual suppression times
     
     # Counter configuration
     counter_time_window: int = 10
-
-    # Add detection confirmation delay
-    detection_confirmation_delay: float = 1.5  # seconds to wait before confirming detection
-    combination_wait_times: Dict[str, float] = field(default_factory=dict)  # per-combination delays
     
     # RTSP configuration
     reconnect_delay: int = 5
@@ -67,21 +67,13 @@ class AppConfig:
         
         #if not self.class_cooldowns:
         #    self.class_cooldowns = {0: 10, 1: 5, 2: 15}
-
-        # Initialize combination-specific wait times
-        if not self.combination_wait_times:
-            self.combination_wait_times = {
-                "class_0_1": 2.0,  # 2 seconds for class 0+1
-                "class_0_2": 1.5,  # 1.5 seconds for class 0+2
-                "class_1_2": 2.5,  # 2.5 seconds for class 1+2
-                "all_three": 3.0   # 3 seconds for all three classes
-            }        
             
         if not self.conditional_box_colors:
             self.conditional_box_colors = {
                 "all_three": (0, 255, 255),
                 "two_classes": (255, 0, 255),
-                "sequential_complete": (0, 255, 0)
+                "sequential_complete": (0, 255, 0),
+                "suppressed": (128, 128, 128)  # NEW: Color for suppressed combinations
             }
 
         # Initialize combination alert sounds
@@ -97,8 +89,17 @@ class AppConfig:
                 "class_0_1": 10,
                 "class_0_2": 10, 
                 "class_1_2": 10,
-                "all_three": 15,
-            }            
+                "all_three": 15
+            }        
+
+        # Initialize suppression cooldowns
+        if not self.suppression_cooldowns:
+            self.suppression_cooldowns = {
+                "class_0_1": 25,  # Shorter than sequential_suppression_time for flexibility
+                "class_0_2": 25,
+                "class_1_2": 25,
+                "all_three": 35,
+            }        
 
 class TemporalMemory:
     """Stores class detection states with time-based expiration"""
@@ -289,60 +290,6 @@ class DetectionResult:
         self.confidence = confidence
         self.class_name = class_name
 
-class DetectionConfirmationTracker:
-    """Tracks detection states and confirms them after a delay"""
-    
-    def __init__(self, config: AppConfig):
-        self.config = config
-        self.detection_start_times = {}  # combination_name -> first detection time
-        self.confirmed_detections = set()  # combinations that have been confirmed
-        self.pending_detections = set()  # combinations currently being tracked
-    
-    def update_detection_state(self, active_combinations: Set[str], current_time: float) -> Set[str]:
-        """Update detection states and return confirmed combinations"""
-        confirmed = set()
-        
-        # Check each active combination
-        for combo_name in active_combinations:
-            if combo_name not in self.pending_detections:
-                # Start tracking new detection
-                self.detection_start_times[combo_name] = current_time
-                self.pending_detections.add(combo_name)
-                logger.info(f"Started tracking combination: {combo_name}")
-            
-            # Check if detection should be confirmed
-            wait_time = self.config.combination_wait_times.get(
-                combo_name, self.config.detection_confirmation_delay
-            )
-            
-            elapsed_time = current_time - self.detection_start_times[combo_name]
-            if elapsed_time >= wait_time and combo_name not in self.confirmed_detections:
-                confirmed.add(combo_name)
-                self.confirmed_detections.add(combo_name)
-                logger.info(f"Combination confirmed: {combo_name} after {elapsed_time:.1f}s")
-        
-        # Remove combinations that are no longer active
-        for combo_name in list(self.pending_detections):
-            if combo_name not in active_combinations:
-                self.pending_detections.discard(combo_name)
-                self.detection_start_times.pop(combo_name, None)
-                self.confirmed_detections.discard(combo_name)
-                logger.info(f"Stopped tracking combination: {combo_name}")
-        
-        return confirmed
-    
-    def get_pending_detection_time(self, combo_name: str, current_time: float) -> float:
-        """Get how long a detection has been pending"""
-        if combo_name in self.detection_start_times:
-            return current_time - self.detection_start_times[combo_name]
-        return 0.0
-    
-    def reset(self):
-        """Reset all tracking states"""
-        self.detection_start_times.clear()
-        self.confirmed_detections.clear()
-        self.pending_detections.clear()
-
 class IModel(ABC):
     """Abstract interface for detection models"""
     
@@ -410,11 +357,17 @@ class SequentialMemory:
         self.sequence_timeout = sequence_timeout
         self.detection_sequences = {}
         self.current_sequence_id = 0
+        self.suppression_timers = {}  # NEW: Track suppression for each combination
+        self.sequence_start_time = None  # NEW: Track when current sequence started        
     
     def add_detection(self, class_id: int) -> int:
         """Add detection to sequence"""
         current_time = time.time()
         active_sequence = self._get_active_sequence()
+
+        # NEW: Start sequence timer if this is the first detection
+        if active_sequence is None:
+            self.sequence_start_time = current_time        
         
         if active_sequence and class_id not in active_sequence:
             active_sequence[class_id] = current_time
@@ -422,6 +375,7 @@ class SequentialMemory:
         else:
             self.current_sequence_id += 1
             self.detection_sequences[self.current_sequence_id] = {class_id: current_time}
+            self.sequence_start_time = current_time  # NEW: Reset sequence start time            
             return self.current_sequence_id
     
     def _get_active_sequence(self) -> Optional[Dict[int, float]]:
@@ -437,54 +391,56 @@ class SequentialMemory:
             del self.detection_sequences[seq_id]
         
         return self.detection_sequences.get(self.current_sequence_id)
-    
+   
     def check_sequence_complete(self, required_classes: Tuple[int, ...]) -> bool:
         """Check if sequence contains all required classes"""
         active_sequence = self._get_active_sequence()
         return active_sequence and all(cls_id in active_sequence for cls_id in required_classes)
     
-    def get_sequence_duration(self, current_time: float) -> float:
-        """Get how long the current sequence has been active"""
-        active_sequence = self._get_active_sequence()
-        if not active_sequence or not active_sequence.values():
-            return 0.0
-        
-        earliest_detection = min(active_sequence.values())
-        return current_time - earliest_detection
-
     def get_sequence_classes(self) -> Set[int]:
         """Get classes in current sequence"""
         active_sequence = self._get_active_sequence()
         return set(active_sequence.keys()) if active_sequence else set()
 
-    def get_class_detection_time(self, class_id: int) -> Optional[float]:
-        """Get when a specific class was first detected in current sequence"""
-        active_sequence = self._get_active_sequence()
-        return active_sequence.get(class_id) if active_sequence else None
+    def get_sequence_duration(self) -> float:
+        """NEW: Get how long the current sequence has been active"""
+        if self.sequence_start_time is None:
+            return 0.0
+        return time.time() - self.sequence_start_time
     
-    def is_sequence_mature(self, required_classes: Set[int], min_duration: float, current_time: float) -> bool:
-        """Check if sequence contains required classes and has existed for min duration"""
-        active_sequence = self._get_active_sequence()
-        if not active_sequence:
-            return False
+    def is_combination_suppressed(self, combination_name: str, suppression_time: float) -> bool:
+        """NEW: Check if a combination should be suppressed based on recent sequence activity"""
+        current_time = time.time()
         
-        # Check if all required classes are present
-        if not required_classes.issubset(set(active_sequence.keys())):
-            return False
+        # Check if this combination was recently triggered
+        if combination_name in self.suppression_timers:
+            time_since_suppression = current_time - self.suppression_timers[combination_name]
+            if time_since_suppression < suppression_time:
+                return True
         
-        # Check if sequence has existed long enough
-        sequence_duration = self.get_sequence_duration(current_time)
-        return sequence_duration >= min_duration
+        return False
+    
+    def suppress_combination(self, combination_name: str):
+        """NEW: Mark a combination as suppressed"""
+        self.suppression_timers[combination_name] = time.time()
+    
+    def cleanup_suppressions(self, current_time: float):
+        """NEW: Clean up old suppression records"""
+        expired_suppressions = [
+            combo for combo, suppress_time in self.suppression_timers.items()
+            if current_time - suppress_time > 60  # Clean up after 60 seconds
+        ]
+        for combo in expired_suppressions:
+            del self.suppression_timers[combo]
 
 class AlertManager:
     """Manages conditional audio alerts based on class combinations"""
     
-    def __init__(self, config: AppConfig, sequential_memory: SequentialMemory):
+    def __init__(self, config: AppConfig):
         self.config = config
         self.alert_timers = {}  # Now tracks combination alerts instead of class alerts
         self.combination_sounds = {}  # Stores loaded sound objects for combinations
-        self.sequential_memory = sequential_memory
-        self.confirmation_tracker = DetectionConfirmationTracker(config)        
+        self.suppression_status = {}  # Track suppression status for combinations        
         self._init_audio()
     
     def _init_audio(self):
@@ -503,180 +459,38 @@ class AlertManager:
             logger.error(f"Audio initialization error: {e}")
             self.combination_sounds = {}
     
-    def _should_trigger_combination(self, combination_name: str, current_time: float) -> bool:
-        """Check if combination should trigger based on SequentialMemory state"""
-        # Get the sequence data from SequentialMemory
-        active_sequence = self.sequential_memory._get_active_sequence()
-        
-        if not active_sequence:
-            return False
-        
-        # Check if the required classes are in the current sequence
-        required_classes = self._get_required_classes_for_combination(combination_name)
-        sequence_classes = set(active_sequence.keys())
-        
-        # All required classes must be in the sequence
-        if not required_classes.issubset(sequence_classes):
-            return False
-        
-        # Check if the sequence has been active long enough
-        class_times = [active_sequence[cls_id] for cls_id in required_classes if cls_id in active_sequence]
-        if not class_times:
-            return False
-        
-        # Use the earliest detection time in the sequence
-        earliest_detection_time = min(class_times)
-        wait_time = self.config.combination_wait_times.get(combination_name, self.config.detection_confirmation_delay)
-        
-        # Check if enough time has passed since the first detection in this sequence
-        if (current_time - earliest_detection_time) >= wait_time:
-            # Check cooldown
-            if self._is_off_cooldown(combination_name, current_time):
-                return True
-        
-        return False    
-
-    def _get_required_classes_for_combination(self, combination_name: str) -> Set[int]:
-        """Map combination names to required class sets"""
-        combination_map = {
-            "class_0_1": {0, 1},
-            "class_0_2": {0, 2},
-            "class_1_2": {1, 2}
-        }
-        return combination_map.get(combination_name, set())
-    
-    def _is_off_cooldown(self, combination_name: str, current_time: float) -> bool:
-        """Check if combination is off cooldown"""
-        cooldown = self.config.combination_cooldowns.get(combination_name, self.config.alert_cooldown)
-        
-        if (combination_name not in self.alert_timers or 
-            (current_time - self.alert_timers[combination_name]) >= cooldown):
-            self.alert_timers[combination_name] = current_time
-            return True
-        return False
-
-    def should_trigger_combination_alert(self, combination_name: str) -> bool:
-        """Check if combination alert should be triggered based on cooldown"""
+    def should_trigger_combination_alert(self, combination_name: str, 
+                                       sequential_memory: SequentialMemory) -> bool:
+        """Check if combination alert should be triggered with suppression logic"""
         current_time = time.time()
         cooldown = self.config.combination_cooldowns.get(combination_name, self.config.alert_cooldown)
         
+        # NEW: Check if this combination is suppressed due to recent sequence activity
+        suppression_time = self.config.suppression_cooldowns.get(combination_name, 
+                                                               self.config.sequential_suppression_time)
+        
+        if sequential_memory.is_combination_suppressed(combination_name, suppression_time):
+            logger.info(f"Combination {combination_name} suppressed due to recent sequence activity")
+            return False
+        
+        # Original cooldown check
         if (combination_name not in self.alert_timers or 
             (current_time - self.alert_timers[combination_name]) >= cooldown):
             self.alert_timers[combination_name] = current_time
             return True
         return False
     
-    def play_combination_alert(self, combination_name: str):
-        """Play alert sound for specific combination"""
+    def play_combination_alert(self, combination_name: str, sequential_memory: SequentialMemory):
+        """Play alert sound and mark combination as suppressed"""
         sound = self.combination_sounds.get(combination_name)
         if sound:
+            # NEW: Suppress this combination to prevent immediate re-triggering
+            sequential_memory.suppress_combination(combination_name)
+            
             threading.Thread(target=sound.play, daemon=True).start()
-            logger.info(f"Playing alert for combination: {combination_name}")
+            logger.info(f"Playing alert for combination: {combination_name} (now suppressed)")
         else:
             logger.warning(f"No sound configured for combination: {combination_name}")
-
-    def check_combination_alerts(self, current_frame_classes: Set[int], current_time: float) -> Set[str]:
-        """Check which combinations should trigger alerts based on SequentialMemory"""
-        confirmed_combinations = set()
-        
-        # Get current special classes in frame
-        current_special = current_frame_classes.intersection(set(self.config.special_classes))
-        
-        # Check each combination condition
-        if current_special == {0, 1}:  # Only class 0 and 1
-            if self._should_trigger_combination("class_0_1", current_time):
-                confirmed_combinations.add("class_0_1")
-                
-        elif current_special == {0, 2}:  # Only class 0 and 2
-            if self._should_trigger_combination("class_0_2", current_time):
-                confirmed_combinations.add("class_0_2")
-                
-        elif current_special == {1, 2}:  # Only class 1 and 2
-            if self._should_trigger_combination("class_1_2", current_time):
-                confirmed_combinations.add("class_1_2")
-        
-        return confirmed_combinations
-
-    def update_detection_states(self, current_frame_classes: Set[int], 
-                              active_temporal_classes: Set[int], current_time: float) -> Set[str]:
-        """Update detection states and return confirmed combinations"""
-        # Determine which combinations are currently active
-        active_combinations = self._get_active_combinations(current_frame_classes, active_temporal_classes)
-        
-        # Update confirmation tracker
-        confirmed = self.confirmation_tracker.update_detection_state(active_combinations, current_time)
-        
-        return confirmed
-    
-    def _get_active_combinations(self, current_frame_classes: Set[int], 
-                               active_temporal_classes: Set[int]) -> Set[str]:
-        """Get currently active combinations"""
-        active_combinations = set()
-        
-        # Check current frame combinations
-        current_special = current_frame_classes.intersection(set(self.config.special_classes))
-        
-        if current_special == {0, 1}:
-            active_combinations.add("class_0_1")
-        elif current_special == {0, 2}:
-            active_combinations.add("class_0_2")
-        elif current_special == {1, 2}:
-            active_combinations.add("class_1_2")
-        elif current_special == {0, 1, 2}:
-            active_combinations.add("all_three")
-        
-        # Also check temporal combinations for robustness
-        temporal_special = active_temporal_classes.intersection(set(self.config.special_classes))
-        
-        if temporal_special == {0, 1}:
-            active_combinations.add("class_0_1_temporal")
-        elif temporal_special == {0, 2}:
-            active_combinations.add("class_0_2_temporal")
-        elif temporal_special == {1, 2}:
-            active_combinations.add("class_1_2_temporal")
-        
-        return active_combinations
-    
-    def should_trigger_combination_alert(self, combination_name: str) -> bool:
-        """Check if combination alert should be triggered (cooldown only)"""
-        current_time = time.time()
-        cooldown = self.config.combination_cooldowns.get(combination_name, self.config.alert_cooldown)
-        
-        if (combination_name not in self.alert_timers or 
-            (current_time - self.alert_timers[combination_name]) >= cooldown):
-            self.alert_timers[combination_name] = current_time
-            return True
-        return False
-    
-    def play_confirmed_alert(self, confirmed_combinations: Set[str], current_time: float):
-        """Play alerts only for confirmed combinations"""
-        for combo_name in confirmed_combinations:
-            # Remove temporal suffix for sound lookup
-            sound_combo_name = combo_name.replace('_temporal', '')
-            
-            if self.should_trigger_combination_alert(combo_name):
-                self.play_combination_alert(sound_combo_name)
-                
-                # Log confirmation details
-                wait_time = self.config.combination_wait_times.get(
-                    sound_combo_name, self.config.detection_confirmation_delay
-                )
-                logger.info(f"Alert played for {combo_name} after {wait_time}s confirmation")
-    
-    def get_pending_detection_info(self) -> Dict[str, float]:
-        """Get information about pending detections for UI display"""
-        current_time = time.time()
-        pending_info = {}
-        
-        for combo_name in self.confirmation_tracker.pending_detections:
-            elapsed = self.confirmation_tracker.get_pending_detection_time(combo_name, current_time)
-            required = self.config.combination_wait_times.get(
-                combo_name.replace('_temporal', ''), 
-                self.config.detection_confirmation_delay
-            )
-            pending_info[combo_name] = (elapsed, required)
-        
-        return pending_info
 
 class TimeWindowCounter:
     """Manages time-based counter with rolling window"""
@@ -821,18 +635,15 @@ class DetectionVisualizer:
             self.draw_mask(frame, combined_mask, color)
     
     def draw_info_panel(self, frame: np.ndarray, frame_counts: Counter, 
-                        time_window_counter: TimeWindowCounter, alert_manager: AlertManager,
-                        sequential_memory: SequentialMemory, is_connected: bool, 
-                        failure_count: int):
-        """Draw all information panels including confirmation status"""
+                       time_window_counter: TimeWindowCounter, alert_manager: AlertManager,
+                       sequential_memory: SequentialMemory, is_connected: bool, 
+                       failure_count: int):
+        """Draw all information panels on the frame"""
         # Resize frame for display
         frame = cv2.resize(frame, (self.config.display_width, self.config.display_height))
         
         # Draw counter panel
         self._draw_counter_panel(frame, frame_counts, time_window_counter)
-        
-        # Draw confirmation status
-        self._draw_confirmation_status(frame, alert_manager)
         
         # Draw cooldown status
         self._draw_cooldown_status(frame, alert_manager)
@@ -885,27 +696,11 @@ class DetectionVisualizer:
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
     
     def _draw_sequential_status(self, frame: np.ndarray, sequential_memory: SequentialMemory):
-        """Draw enhanced sequential detection status with timing info"""
-        current_time = time.time()
+        """Draw sequential detection status"""
         memory_classes = sequential_memory.get_sequence_classes()
-        sequence_duration = sequential_memory.get_sequence_duration(current_time)
-        
-        memory_text = f"Sequence: {sorted(memory_classes)} ({sequence_duration:.1f}s)"
+        memory_text = f"Memory: {sorted(memory_classes)}"
         cv2.putText(frame, memory_text, (10, frame.shape[0] - 50),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        
-        # Show wait times for active combinations
-        if memory_classes:
-            y_offset = frame.shape[0] - 80
-            for combo_name, wait_time in self.config.combination_wait_times.items():
-                required_classes = self._get_required_classes_for_display(combo_name)
-                if required_classes.issubset(memory_classes):
-                    status = "READY" if sequence_duration >= wait_time else "WAITING"
-                    color = (0, 255, 0) if sequence_duration >= wait_time else (0, 255, 255)
-                    combo_text = f"{combo_name}: {status} ({sequence_duration:.1f}s/{wait_time}s)"
-                    cv2.putText(frame, combo_text, (10, y_offset),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
-                    y_offset -= 20
     
     def _draw_text_panel(self, frame: np.ndarray, lines: List[str], x0: int, y0: int, 
                         panel_w: int, right_align: bool = False):
@@ -928,45 +723,6 @@ class DetectionVisualizer:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
             y += self.line_height
     
-    def _draw_confirmation_status(self, frame: np.ndarray, alert_manager: AlertManager):
-        """Draw detection confirmation status"""
-        pending_info = alert_manager.get_pending_detection_info()
-        current_time = time.time()
-        
-        y_offset = 30
-        for i, (combo_name, (elapsed, required)) in enumerate(pending_info.items()):
-            progress = min(elapsed / required, 1.0)
-            status_text = f"{combo_name}: {progress:.0%} ({elapsed:.1f}s/{required:.1f}s)"
-            
-            # Color based on progress (yellow -> green)
-            if progress < 1.0:
-                color = (0, 255, 255)  # Yellow
-            else:
-                color = (0, 255, 0)    # Green
-            
-            cv2.putText(frame, status_text, (10, y_offset + i * 25), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-            
-            # Draw progress bar
-            bar_width = 200
-            bar_height = 8
-            bar_x = 10
-            bar_y = y_offset + i * 25 + 15
-            
-            # Background bar
-            cv2.rectangle(frame, (bar_x, bar_y), 
-                         (bar_x + bar_width, bar_y + bar_height), (100, 100, 100), -1)
-            
-            # Progress bar
-            progress_width = int(bar_width * progress)
-            cv2.rectangle(frame, (bar_x, bar_y), 
-                         (bar_x + progress_width, bar_y + bar_height), color, -1)
-        
-        # If no pending detections, show waiting message
-        if not pending_info:
-            cv2.putText(frame, "Waiting for detections...", (10, y_offset), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
     def draw_error_message(self, frame: np.ndarray, message: str):
         """Display error message"""
         overlay = frame.copy()
@@ -983,16 +739,6 @@ class DetectionVisualizer:
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             y_pos += 40
 
-    def _get_required_classes_for_display(self, combo_name: str) -> Set[int]:
-        """Helper for display purposes"""
-        combo_map = {
-            "class_0_1": {0, 1},
-            "class_0_2": {0, 2},
-            "class_1_2": {1, 2},
-            "all_three": {0, 1, 2}
-        }
-        return combo_map.get(combo_name, set())
-
 class DetectionProcessor:
     """Processes detections and applies combination-based alert logic"""
     
@@ -1001,20 +747,24 @@ class DetectionProcessor:
         self.model = model
         self.sequential_memory = sequential_memory
         self.temporal_memory = temporal_memory
+        self.last_combination_alert = {}  # NEW: Track last alert time for each combination
     
     def process_detections(self, frame: np.ndarray, alert_manager: AlertManager, 
                           time_window_counter: TimeWindowCounter) -> Tuple[Counter, List[DetectionResult], Set[int]]:
-        """Process frame and update detection states"""
+        """Process frame with sequential suppression logic"""
         frame_counts = Counter()
         special_detections = []
         current_frame_classes = set()
-        current_time = time.time()
+        
+        # NEW: Clean up old suppressions
+        self.sequential_memory.cleanup_suppressions(time.time())
         
         # Run model inference
         detections = self.model.predict(frame)
+        current_time = time.time()
         
         for detection in detections:
-            # Update counters and tracking
+            # Update counters
             frame_counts[detection.class_name] += 1
             time_window_counter.add_detection(detection.class_name)
             current_frame_classes.add(detection.class_id)
@@ -1022,30 +772,19 @@ class DetectionProcessor:
             # Update temporal memory
             self.temporal_memory.update_detection(detection.class_id, current_time)
             
-            # Track special classes in sequential memory
+            # Track special classes
             if detection.class_id in self.config.special_classes:
                 special_detections.append(detection)
                 self.sequential_memory.add_detection(detection.class_id)
         
-        # Get active temporal classes
-        active_temporal_classes = self.temporal_memory.get_active_classes(current_time)
-        
-        # Check for combination alerts using SequentialMemory
-        confirmed_combinations = alert_manager.check_combination_alerts(current_frame_classes, current_time)
-        
-        # Play alerts for confirmed combinations
-        for combo_name in confirmed_combinations:
-            alert_manager.play_combination_alert(combo_name)
-            
-            # Log the sequence duration that triggered the alert
-            seq_duration = self.sequential_memory.get_sequence_duration(current_time)
-            logger.info(f"Alert triggered for {combo_name} after {seq_duration:.1f}s sequence duration")
+        # Apply combination-based alert logic with suppression
+        self._check_combination_alerts(current_frame_classes, alert_manager, current_time)
         
         return frame_counts, special_detections, current_frame_classes
     
     def _check_combination_alerts(self, current_frame_classes: Set[int], 
                                 alert_manager: AlertManager, current_time: float):
-        """Check for specific class combinations and trigger alerts"""
+        """Check for specific class combinations with sequential suppression"""
         # Get all classes active in time window
         active_classes = self.temporal_memory.get_active_classes(current_time)
         
@@ -1053,55 +792,45 @@ class DetectionProcessor:
         current_special = current_frame_classes.intersection(set(self.config.special_classes))
         active_special = active_classes.intersection(set(self.config.special_classes))
         
-        # Check for exact combinations in current frame
-        if current_special == {0, 1}:  # Only class 0 and 1
-            if alert_manager.should_trigger_combination_alert("class_0_1"):
-                alert_manager.play_combination_alert("class_0_1")
-                logger.info("Combination alert: Class 0 and 1 detected together")
-                
-        elif current_special == {0, 2}:  # Only class 0 and 2
-            if alert_manager.should_trigger_combination_alert("class_0_2"):
-                alert_manager.play_combination_alert("class_0_2")
-                logger.info("Combination alert: Class 0 and 2 detected together")
-                
-        elif current_special == {1, 2}:  # Only class 1 and 2
-            if alert_manager.should_trigger_combination_alert("class_1_2"):
-                alert_manager.play_combination_alert("class_1_2")
-                logger.info("Combination alert: Class 1 and 2 detected together")
-
-        elif current_special == {0, 1, 2}:  # All three classes
-            if alert_manager.should_trigger_combination_alert("all_three"):
-                alert_manager.play_combination_alert("all_three")
-                logger.info("Combination alert: All three special classes detected together")
+        # NEW: Enhanced combination checking with suppression
+        combinations_to_check = [
+            ({"class_0_1", "class_0_1_temporal"}, {0, 1}, "class_0_1"),
+            ({"class_0_2", "class_0_2_temporal"}, {0, 2}, "class_0_2"),
+            ({"class_1_2", "class_1_2_temporal"}, {1, 2}, "class_1_2"),
+            ({"all_three", "all_three_temporal"}, {0, 1, 2}, "all_three")
+        ]
+        
+        for combo_names, required_classes, alert_name in combinations_to_check:
+            # Check current frame
+            if current_special == required_classes:
+                if alert_manager.should_trigger_combination_alert(alert_name, self.sequential_memory):
+                    alert_manager.play_combination_alert(alert_name, self.sequential_memory)
+                    logger.info(f"Combination alert: {alert_name} detected together")
+                    # Don't break to allow multiple combinations to be checked
         
         # Optional: Also check in temporal memory (across multiple frames)
         self._check_temporal_combinations(active_special, alert_manager, current_time)
     
     def _check_temporal_combinations(self, active_special: Set[int], 
                                    alert_manager: AlertManager, current_time: float):
-        """Check for combinations across temporal window"""
-        if active_special == {0, 1}:  # Class 0 and 1 active in time window
-            if alert_manager.should_trigger_combination_alert("class_0_1_temporal"):
-                alert_manager.play_combination_alert("class_0_1")
-                logger.info("Temporal combination: Class 0 and 1 active in time window")
-                
-        elif active_special == {0, 2}:  # Class 0 and 2 active in time window
-            if alert_manager.should_trigger_combination_alert("class_0_2_temporal"):
-                alert_manager.play_combination_alert("class_0_2")
-                logger.info("Temporal combination: Class 0 and 2 active in time window")
-                
-        elif active_special == {1, 2}:  # Class 1 and 2 active in time window
-            if alert_manager.should_trigger_combination_alert("class_1_2_temporal"):
-                alert_manager.play_combination_alert("class_1_2")
-                logger.info("Temporal combination: Class 1 and 2 active in time window")
+        """Check for combinations across temporal window with suppression"""
+        temporal_combinations = [
+            ({0, 1}, "class_0_1"),
+            ({0, 2}, "class_0_2"),
+            ({1, 2}, "class_1_2"),
+            ({0, 1, 2}, "all_three")
+        ]
+        
+        for required_classes, alert_name in temporal_combinations:
+            if active_special == required_classes:
+                temporal_alert_name = f"{alert_name}_temporal"
+                if alert_manager.should_trigger_combination_alert(alert_name, self.sequential_memory):
+                    alert_manager.play_combination_alert(alert_name, self.sequential_memory)
+                    logger.info(f"Temporal combination: {alert_name} active in time window")
 
-        elif active_special == {0, 1, 2}:  # All three classes active in time window
-            if alert_manager.should_trigger_combination_alert("all_three_temporal"):
-                alert_manager.play_combination_alert("all_three")
-                logger.info("Temporal combination: All three special classes active in time window")
 
 class EnhancedConditionalLogicProcessor:
-    """Handles conditional detection logic using SequentialMemory"""
+    """Handles conditional detection logic with combination-based alerts"""
     
     def __init__(self, config: AppConfig, sequential_memory: SequentialMemory, temporal_memory: TemporalMemory):
         self.config = config
@@ -1110,34 +839,32 @@ class EnhancedConditionalLogicProcessor:
     
     def apply_conditional_logic(self, frame: np.ndarray, special_detections: List[DetectionResult],
                               current_frame_classes: Set[int], visualizer: DetectionVisualizer, 
-                              current_time: float) -> bool:
-        """Apply conditional logic using SequentialMemory state"""
+                              alert_manager: AlertManager, current_time: float) -> bool:
+        """Apply conditional logic with suppression visualization"""
         
-        # Get sequence information
-        sequence_classes = self.sequential_memory.get_sequence_classes()
-        sequence_duration = self.sequential_memory.get_sequence_duration(current_time)
+        # Get all classes active in time window
+        all_active_classes = self.temporal_memory.get_active_classes(current_time)
+        active_special = all_active_classes.intersection(set(self.config.special_classes))
+        
+        # NEW: Check if combinations are suppressed
+        is_suppressed = self._check_suppression_status()
         
         # Check various conditions for visualization
-        if sequence_classes == set(self.config.special_classes):
-            visualizer.draw_combined_detection(frame, special_detections, "all_three")
+        if all_active_classes == set(self.config.special_classes):
+            visualizer.draw_combined_detection(frame, special_detections, 
+                                             "suppressed" if is_suppressed else "all_three")
             return True
             
-        elif len(sequence_classes) == 2:
+        elif len(active_special) == 2:
             # Determine which specific combination for visualization
-            if sequence_classes == {0, 1}:
-                combo_type = "class_0_1"
-            elif sequence_classes == {0, 2}:
-                combo_type = "class_0_2"
-            elif sequence_classes == {1, 2}:
-                combo_type = "class_1_2"
-            else:
-                combo_type = "two_classes"
-            
-            visualizer.draw_combined_detection(frame, special_detections, combo_type)
+            combo_type = self._get_combination_type(active_special)
+            visualizer.draw_combined_detection(frame, special_detections, 
+                                             "suppressed" if is_suppressed else combo_type)
             return True
             
-        elif self._check_sequential_complete(sequence_classes):
-            visualizer.draw_combined_detection(frame, special_detections, "sequential_complete")
+        elif self._check_sequential_complete(active_special, current_time):
+            visualizer.draw_combined_detection(frame, special_detections, 
+                                             "suppressed" if is_suppressed else "sequential_complete")
             return True
         else:
             # Draw individual detections
@@ -1145,9 +872,34 @@ class EnhancedConditionalLogicProcessor:
                 visualizer.draw_detection(frame, detection)
             return False
     
-    def _check_sequential_complete(self, sequence_classes: Set[int]) -> bool:
-        """Check if required sequence is complete"""
-        return sequence_classes.issuperset(set(self.config.special_classes))
+    def _get_combination_type(self, active_special: Set[int]) -> str:
+        """Get the specific combination type"""
+        if active_special == {0, 1}:
+            return "class_0_1"
+        elif active_special == {0, 2}:
+            return "class_0_2"
+        elif active_special == {1, 2}:
+            return "class_1_2"
+        else:
+            return "two_classes"
+    
+    def _check_suppression_status(self) -> bool:
+        """NEW: Check if any relevant combinations are currently suppressed"""
+        current_time = time.time()
+        combinations_to_check = ["class_0_1", "class_0_2", "class_1_2", "all_three"]
+        
+        for combo_name in combinations_to_check:
+            suppression_time = self.config.suppression_cooldowns.get(combo_name, 
+                                                                   self.config.sequential_suppression_time)
+            if self.sequential_memory.is_combination_suppressed(combo_name, suppression_time):
+                return True
+        return False
+    
+    def _check_sequential_complete(self, active_classes: Set[int], current_time: float) -> bool:
+        """Enhanced sequential check using temporal memory"""
+        return active_classes.issuperset(set(self.config.special_classes))
+
+
 class ObjectDetectorApp:
     """Main application class"""
     
@@ -1157,7 +909,7 @@ class ObjectDetectorApp:
         self.model = YOLOModel(config)
         self.sequential_memory = SequentialMemory()
         self.temporal_memory = TemporalMemory(time_window=10.0)  
-        self.alert_manager = AlertManager(config, self.sequential_memory)  
+        self.alert_manager = AlertManager(config)
         self.visualizer = DetectionVisualizer(config)
         self.time_window_counter = TimeWindowCounter(config.counter_time_window)
         self.detection_processor = DetectionProcessor(config, self.model, self.sequential_memory, self.temporal_memory)  # Update this line
@@ -1221,16 +973,17 @@ class ObjectDetectorApp:
     def _process_successful_frame(self, frame: np.ndarray):
         """Process a successfully read frame"""
         self.consecutive_failures = 0
-        current_time = time.time()
+        current_time = time.time()  # Get current time for temporal logic
         
-        # Process detections (alerts are now handled within process_detections)
+        # Process detections (now includes combination alert logic)
         frame_counts, special_detections, current_frame_classes = self.detection_processor.process_detections(
             frame, self.alert_manager, self.time_window_counter
         )
         
-        # Apply conditional logic
+        # Apply conditional logic (pass alert_manager and current_time)
         self.conditional_processor.apply_conditional_logic(
-            frame, special_detections, current_frame_classes, self.visualizer, current_time
+            frame, special_detections, current_frame_classes, self.visualizer,
+            self.alert_manager, current_time
         )
         
         # Draw information and display
@@ -1287,6 +1040,13 @@ def main():
             "all_three": 30,
         },
         alert_cooldown=5,
+        sequential_suppression_time=30,  # Global suppression time
+        suppression_cooldowns={
+            "class_0_1": 25,  # Individual suppression times
+            "class_0_2": 25,
+            "class_1_2": 25,
+            "all_three": 35,
+        },
         #class_cooldowns={},
         counter_time_window=10,
         reconnect_delay=5,
@@ -1295,22 +1055,14 @@ def main():
         conditional_box_colors={
             "all_three": (0, 255, 255),
             "two_classes": (255, 0, 255),
-            "sequential_complete": (0, 255, 0)
+            "sequential_complete": (0, 255, 0),
+            "suppressed": (128, 128, 128),  # Gray color for suppressed combinations            
         },
         mask_alpha=0.5,
         draw_masks=True,
         draw_boxes=True,
         display_width=1024,
-        display_height=576,
-        
-        # Add confirmation delay settings
-        detection_confirmation_delay=1.5,
-        combination_wait_times={
-            "class_0_1": 2.0,
-            "class_0_2": 1.5, 
-            "class_1_2": 2.5,
-            "all_three": 1.0,
-        },
+        display_height=576
     )
     
     # Create and run the application
