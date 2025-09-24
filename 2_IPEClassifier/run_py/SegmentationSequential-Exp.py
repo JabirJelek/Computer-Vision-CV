@@ -437,7 +437,7 @@ class TimeWindowCounter:
         """Add detection to history"""
         current_time = time.time()
         self.detection_history.append((current_time, class_name))
-        self.current_counts[class_name] += 1
+        self.current_counts[class_name] += 0.1
         self._prune_old_detections(current_time)
     
     def _prune_old_detections(self, current_time: float):
@@ -445,7 +445,7 @@ class TimeWindowCounter:
         while (self.detection_history and 
                current_time - self.detection_history[0][0] > self.time_window):
             old_time, old_class = self.detection_history.popleft()
-            self.current_counts[old_class] -= 1
+            self.current_counts[old_class] -= 2
             
             if self.current_counts[old_class] <= 0:
                 del self.current_counts[old_class]
@@ -946,7 +946,7 @@ def main():
             "class_0_1": Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-09-352705.mp3"),
             "class_0_2": Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3"),
             "class_1_2": Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3"),
-            "all_three": Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\level-up-07-383747.mp3"),
+            "all_three": Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3"),
         },
         combination_cooldowns={
             "class_0_1": 15,
@@ -956,7 +956,7 @@ def main():
         },
         alert_cooldown=5,
         #class_cooldowns={},
-        counter_time_window=10,
+        counter_time_window=8,
         reconnect_delay=5,
         max_consecutive_failures=3,
         special_classes=(0, 1, 2),
