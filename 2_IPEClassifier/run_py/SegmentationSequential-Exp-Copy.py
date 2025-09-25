@@ -37,7 +37,7 @@ class AppConfig:
     combination_cooldowns: Dict[str, int] = field(default_factory=dict)
     
     # Sequential suppression configuration
-    sequential_suppression_time: int = 30  # Seconds to suppress after sequence detection
+    sequential_suppression_time: int = 20  # Seconds to suppress after sequence detection
     suppression_cooldowns: Dict[str, int] = field(default_factory=dict)  # Individual suppression times
 
     # Detection delay configuration
@@ -89,10 +89,10 @@ class AppConfig:
         
         if not self.combination_cooldowns:
             self.combination_cooldowns = {
-                "class_0_1": 10,
-                "class_0_2": 10, 
-                "class_1_2": 10,
-                "all_three": 30,
+                "class_0_1": 15,
+                "class_0_2": 15, 
+                "class_1_2": 15,
+                "all_three": 10,
             }        
 
         # Initialize suppression cooldowns
@@ -101,13 +101,13 @@ class AppConfig:
                 "class_0_1": 25,  
                 "class_0_2": 25,
                 "class_1_2": 25,
-                "all_three": 35,
+                "all_three": 15,
             }        
 
 class TemporalMemory:
     """Stores class detection states with time-based expiration"""
     
-    def __init__(self, time_window: float = 5.0):
+    def __init__(self, time_window: float = 10.0):
         self.time_window = time_window
         self.class_states = {}  # class_id -> last_detection_time
         self.class_presence = {}  # class_id -> is_active_until
@@ -230,7 +230,7 @@ class EnhancedSequentialLogic:
         conditions = {
             "all_three_current": current_frame_classes == set(self.config.special_classes),
             "all_three_temporal": all_active_classes == set(self.config.special_classes),
-            "sequential_complete": self._check_sequential_complete(all_active_classes),
+            #"sequential_complete": self._check_sequential_complete(all_active_classes),
             "any_two_temporal": len(all_active_classes) >= 2
         }
         
@@ -435,7 +435,7 @@ class YOLOModel(IModel):
 class SequentialMemory:
     """Stores detection sequences across multiple frames"""
     
-    def __init__(self, sequence_timeout: float = 15.0):
+    def __init__(self, sequence_timeout: float = 10.0):
         self.sequence_timeout = sequence_timeout
         self.detection_sequences = {}
         self.current_sequence_id = 0
@@ -709,7 +709,7 @@ class DetectionVisualizer:
             "class_0_1": "Missing Menu",
             "class_0_2": "Missing Rice", 
             "class_1_2": "Missing Fork",
-            "suppressed": "SUPPRESSED",
+            "suppressed": "Listen to audio...",
             "pending": "PENDING CONFIRMATION"
         }
         label = labels.get(conditional_type, "COMBINED DETECTION")
@@ -937,7 +937,6 @@ class DetectionProcessor:
                 alert_manager.play_combination_alert(alert_name, self.sequential_memory)
                 logger.info(f"Temporal memory combination alert: {alert_name} confirmed")
     
-
 class EnhancedConditionalLogicProcessor:
     """Handles conditional detection logic with combination-based alerts"""
     
@@ -977,10 +976,10 @@ class EnhancedConditionalLogicProcessor:
             visualizer.draw_combined_detection(frame, special_detections, combo_type, buffer_progress)
             return True
             
-        elif self._check_sequential_complete(active_special, current_time):
-            combo_type = "suppressed" if is_suppressed else "sequential_complete"
-            visualizer.draw_combined_detection(frame, special_detections, combo_type, buffer_progress)
-            return True
+        #elif self._check_sequential_complete(active_special, current_time):
+        #    combo_type = "suppressed" if is_suppressed else "sequential_complete"
+        #    visualizer.draw_combined_detection(frame, special_detections, combo_type, buffer_progress)
+        #    return True
         else:
             # Draw individual detections
             for detection in special_detections:
@@ -1024,6 +1023,7 @@ class EnhancedConditionalLogicProcessor:
     def _check_sequential_complete(self, active_classes: Set[int], current_time: float) -> bool:
         """Enhanced sequential check using temporal memory"""
         return active_classes.issuperset(set(self.config.special_classes))
+
 class ObjectDetectorApp:
     """Main application class"""
     
@@ -1168,15 +1168,15 @@ def main():
             "class_0_1": 15,
             "class_0_2": 15,
             "class_1_2": 15,
-            "all_three": 30,
+            "all_three": 10,
         },
         alert_cooldown=5,
-        sequential_suppression_time=30,
+        sequential_suppression_time=11,
         suppression_cooldowns={
-            "class_0_1": 25,
-            "class_0_2": 25,
-            "class_1_2": 25,
-            "all_three": 35,
+            "class_0_1": 8,
+            "class_0_2": 8,
+            "class_1_2": 8,
+            "all_three": 5,
         },
         counter_time_window=10,
         reconnect_delay=5,
