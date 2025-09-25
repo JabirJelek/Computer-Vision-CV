@@ -139,7 +139,7 @@ class TemporalMemory:
 class DetectionBuffer:
     """Buffers detections to prevent instant audio alerts"""
     
-    def __init__(self, delay_time: float = 2.0, min_frames: int = 5):
+    def __init__(self, delay_time: float = 1.5, min_frames: int = 2):
         self.delay_time = delay_time
         self.min_frames = min_frames
         self.buffered_combinations = {}  # combination_name -> {start_time, frame_count, confirmed}
@@ -152,7 +152,7 @@ class DetectionBuffer:
                 # Start tracking new combination
                 self.buffered_combinations[combination_name] = {
                     'start_time': current_time,
-                    'frame_count': 1,
+                    'frame_count': 0,
                     'confirmed': False
                 }
                 logger.info(f"Started buffering combination: {combination_name}")
@@ -1155,7 +1155,7 @@ def main():
         frame_height=480,
         confidence_threshold=0.5,
         detection_delay_time=2,  # Fixed: should be float
-        minimum_detection_frames=5,  # Fixed: consistent with delay time
+        minimum_detection_frames=2,  # Fixed: consistent with delay time
         class_color_map={1: (0, 0, 255), 0: (0, 235, 0), 2: (0, 0, 255)},
         alert_sound_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\level-up-07-383747.mp3"),
         combination_alert_sounds={
@@ -1168,17 +1168,17 @@ def main():
             "class_0_1": 15,
             "class_0_2": 15,
             "class_1_2": 15,
-            "all_three": 15,
+            "all_three": 17,
         },
-        alert_cooldown=5,
+        alert_cooldown=6,
         sequential_suppression_time=11,
         suppression_cooldowns={
-            "class_0_1": 8,
-            "class_0_2": 8,
-            "class_1_2": 8,
-            "all_three": 8,
+            "class_0_1": 10,
+            "class_0_2": 10,
+            "class_1_2": 10,
+            "all_three": 13,
         },
-        counter_time_window=10,
+        counter_time_window=5,
         reconnect_delay=5,
         max_consecutive_failures=3,
         special_classes=(0, 1, 2),
