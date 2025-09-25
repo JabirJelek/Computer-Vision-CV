@@ -16,7 +16,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("DisplayModelCapabilities.log"),
+        logging.FileHandler("DisplayModelCapabilities-Exp.log"),
         logging.StreamHandler(sys.stdout)
     ]
 )
