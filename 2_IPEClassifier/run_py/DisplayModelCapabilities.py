@@ -1045,7 +1045,7 @@ def main():
             class_color_map={1: (0, 0, 255), 0: (0, 255, 0)},  # Red, Green
             #alert_sound_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3"),
             alert_cooldown=2,  # Seconds between alerts for the same class
-            class_cooldowns={0: 2, 1: 2, 2: 2},  # Custom cooldowns per class
+            class_cooldowns={0: 3, 1: 3, 2: 2},  # Custom cooldowns per class
             counter_time_window=10,  # 10-second time window for counter
             reconnect_delay=5,  # Seconds between reconnection attempts
             max_consecutive_failures=3,  # Maximum failures before attempting reconnection
