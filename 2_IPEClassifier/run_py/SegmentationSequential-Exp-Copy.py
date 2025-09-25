@@ -107,7 +107,7 @@ class AppConfig:
 class TemporalMemory:
     """Stores class detection states with time-based expiration"""
     
-    def __init__(self, time_window: float = 10.0):
+    def __init__(self, time_window: float = 4.0):
         self.time_window = time_window
         self.class_states = {}  # class_id -> last_detection_time
         self.class_presence = {}  # class_id -> is_active_until
@@ -435,7 +435,7 @@ class YOLOModel(IModel):
 class SequentialMemory:
     """Stores detection sequences across multiple frames"""
     
-    def __init__(self, sequence_timeout: float = 10.0):
+    def __init__(self, sequence_timeout: float = 2.5):
         self.sequence_timeout = sequence_timeout
         self.detection_sequences = {}
         self.current_sequence_id = 0
@@ -1149,13 +1149,13 @@ def main():
             logger.warning(f"Camera test failed for index {camera_idx}: {e}")
     
     config = AppConfig(
-        model_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\Segmentation1.torchscript"),
+        model_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\Segmentation3.torchscript"),
         camera_source=camera_source,
         frame_width=640,
         frame_height=480,
         confidence_threshold=0.5,
-        detection_delay_time=1.0,  # Fixed: should be float
-        minimum_detection_frames=3,  # Fixed: consistent with delay time
+        detection_delay_time=2,  # Fixed: should be float
+        minimum_detection_frames=5,  # Fixed: consistent with delay time
         class_color_map={1: (0, 0, 255), 0: (0, 235, 0), 2: (0, 0, 255)},
         alert_sound_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\level-up-07-383747.mp3"),
         combination_alert_sounds={
