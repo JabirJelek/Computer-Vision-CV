@@ -435,7 +435,7 @@ class YOLOModel(IModel):
 class SequentialMemory:
     """Stores detection sequences across multiple frames"""
     
-    def __init__(self, sequence_timeout: float = 2.5):
+    def __init__(self, sequence_timeout: float = 0.1):
         self.sequence_timeout = sequence_timeout
         self.detection_sequences = {}
         self.current_sequence_id = 0
@@ -597,7 +597,7 @@ class TimeWindowCounter:
         while (self.detection_history and 
                current_time - self.detection_history[0][0] > self.time_window):
             old_time, old_class = self.detection_history.popleft()
-            self.current_counts[old_class] -= 3
+            self.current_counts[old_class] -= 5
             
             if self.current_counts[old_class] <= 0:
                 del self.current_counts[old_class]
@@ -1168,7 +1168,7 @@ def main():
             "class_0_1": 15,
             "class_0_2": 15,
             "class_1_2": 15,
-            "all_three": 10,
+            "all_three": 15,
         },
         alert_cooldown=5,
         sequential_suppression_time=11,
@@ -1176,7 +1176,7 @@ def main():
             "class_0_1": 8,
             "class_0_2": 8,
             "class_1_2": 8,
-            "all_three": 5,
+            "all_three": 8,
         },
         counter_time_window=10,
         reconnect_delay=5,
