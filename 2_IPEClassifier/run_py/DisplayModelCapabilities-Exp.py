@@ -61,8 +61,23 @@ class AppConfig:
     frame_skip: int = 1  # Process every nth frame (1 = process all frames)
     display_every_frame: bool = True  # Whether to display every frame or only processed ones
     target_fps: int = 30  # Target FPS for display
+
+    # Enhanced audio configuration
+    class_sound_map: Dict[int, Path] = None  # Map class IDs to specific sound files
+    default_alert_sound: Path = None  # Fallback sound for unmapped classes    
     
     def __post_init__(self):
+        # Initialize audio configuration
+        if self.class_sound_map is None:
+            self.class_sound_map = {
+                0: Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\level-up-07-383747.mp3"),
+                1: Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-09-352705.mp3"),
+                #2: Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\class2_alert.mp3"),
+            }
+        
+        if self.default_alert_sound is None:
+            self.default_alert_sound = Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3")
+
         # Initialize default values for mutable objects
         if self.model_paths is None:
             self.model_paths = [Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect.torchscript")]
@@ -84,46 +99,30 @@ class AppConfig:
             self.frame_skip = 1
 
 class AlertManager:
-    """Manages audio alerts with cooldown functionality"""
-    def __init__(self, config: AppConfig):
+    """Simplified alert manager that uses AudioManager"""
+    
+    def __init__(self, config: AppConfig, alert_timers=None):
         self.config = config
-        self.alert_timers = {}
-        
-        try:
-            pygame.mixer.init()
-            if not config.alert_sound_path.exists():
-                logger.warning(f"Alert sound file not found: {config.alert_sound_path}")
-                self.alert_sound = None
-            else:
-                self.alert_sound = pygame.mixer.Sound(str(config.alert_sound_path))
-        except pygame.error as e:
-            logger.error(f"PyGame mixer initialization failed: {e}")
-            self.alert_sound = None
-        except Exception as e:
-            logger.error(f"Audio loading error: {e}")
-            self.alert_sound = None
+        self.audio_manager = AudioManager(config)
+        self.alert_timers = alert_timers if alert_timers is not None else {}
     
     def should_trigger_alert(self, cls_id: int) -> bool:
         """Check if an alert should be triggered based on cooldown"""
-        try:
-            current_time = time.time()
-            cooldown = self.config.class_cooldowns.get(cls_id, self.config.alert_cooldown)
-            
-            if cls_id not in self.alert_timers or (current_time - self.alert_timers[cls_id]) >= cooldown:
-                self.alert_timers[cls_id] = current_time
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"Error in should_trigger_alert: {e}")
-            return False
+        return self.audio_manager.should_trigger_alert(cls_id)
     
-    def play_alert(self):
-        """Play the alert sound in a non-blocking thread"""
+    def play_alert(self, class_id: int = None):
+        """Play alert sound for specific class or default"""
         try:
-            if self.alert_sound:
-                threading.Thread(target=self.alert_sound.play, daemon=True).start()
+            if class_id is not None:
+                self.audio_manager.play_class_alert(class_id)
+            else:
+                self.audio_manager.play_default_alert()
         except Exception as e:
-            logger.error(f"Error playing alert: {e}")
+            logger.error(f"Error in play_alert: {e}")
+    
+    def get_audio_status(self):
+        """Get audio system status"""
+        return self.audio_manager.get_audio_status()
 
 class TimeWindowCounter:
     """Manages a time-based counter with a rolling window"""
@@ -404,6 +403,148 @@ class DetectionVisualizer:
         except Exception as e:
             logger.error(f"Error drawing model status: {e}")
 
+    def draw_audio_status(self, frame, alert_manager):
+        """Display audio system status"""
+        try:
+            audio_status = alert_manager.get_audio_status()
+            
+            status_lines = [
+                "Audio Status:",
+                f"Initialized: {'Yes' if audio_status['initialized'] else 'No'}",
+                f"Loaded Sounds: {audio_status['sounds_loaded']}",
+                f"Available Channels: {audio_status['active_channels']}",
+                f"Class Sounds: {len(audio_status['class_sounds'])} classes"
+            ]
+            
+            # Draw audio status panel in bottom-left
+            self.draw_text_panel(frame, status_lines, 10, frame.shape[0] - 150, 300)
+            
+        except Exception as e:
+            logger.error(f"Error drawing audio status: {e}")
+
+class AudioManager:
+    """Modular audio manager for class-specific sound conditioning"""
+    
+    def __init__(self, config: AppConfig):
+        self.config = config
+        self.sound_library = {}  # Cache for loaded sounds
+        self.alert_timers = {}
+        self._initialized = False
+        
+        self.initialize_audio()
+    
+    def initialize_audio(self):
+        """Initialize audio system and load sounds"""
+        try:
+            pygame.mixer.init()
+            pygame.mixer.set_num_channels(16)  # Allow multiple concurrent sounds
+            
+            # Pre-load all class-specific sounds
+            self._load_sound_library()
+            
+            self._initialized = True
+            logger.info("AudioManager initialized successfully")
+            
+        except pygame.error as e:
+            logger.error(f"PyGame mixer initialization failed: {e}")
+            self._initialized = False
+        except Exception as e:
+            logger.error(f"AudioManager initialization error: {e}")
+            self._initialized = False
+    
+    def _load_sound_library(self):
+        """Load all configured sounds into memory"""
+        try:
+            # Load class-specific sounds
+            for class_id, sound_path in self.config.class_sound_map.items():
+                if sound_path.exists():
+                    self.sound_library[class_id] = pygame.mixer.Sound(str(sound_path))
+                    logger.info(f"Loaded sound for class {class_id}: {sound_path}")
+                else:
+                    logger.warning(f"Sound file not found for class {class_id}: {sound_path}")
+            
+            # Load default sound
+            if self.config.default_alert_sound.exists():
+                self.sound_library['default'] = pygame.mixer.Sound(str(self.config.default_alert_sound))
+                logger.info(f"Loaded default sound: {self.config.default_alert_sound}")
+            else:
+                logger.warning(f"Default sound file not found: {self.config.default_alert_sound}")
+                
+        except Exception as e:
+            logger.error(f"Error loading sound library: {e}")
+    
+    def get_sound_for_class(self, class_id: int) -> Optional[pygame.mixer.Sound]:
+        """Get the appropriate sound for a class ID"""
+        try:
+            # Try class-specific sound first
+            if class_id in self.sound_library:
+                return self.sound_library[class_id]
+            
+            # Fall back to default sound
+            if 'default' in self.sound_library:
+                return self.sound_library['default']
+            
+            return None
+        except Exception as e:
+            logger.error(f"Error getting sound for class {class_id}: {e}")
+            return None
+    
+    def should_trigger_alert(self, cls_id: int) -> bool:
+        """Check if an alert should be triggered based on cooldown"""
+        try:
+            current_time = time.time()
+            cooldown = self.config.class_cooldowns.get(cls_id, self.config.alert_cooldown)
+            
+            if cls_id not in self.alert_timers or (current_time - self.alert_timers[cls_id]) >= cooldown:
+                self.alert_timers[cls_id] = current_time
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error in should_trigger_alert: {e}")
+            return False
+    
+    def play_class_alert(self, class_id: int):
+        """Play the appropriate sound for a specific class"""
+        try:
+            if not self._initialized:
+                logger.warning("Audio system not initialized")
+                return
+            
+            sound = self.get_sound_for_class(class_id)
+            if sound:
+                # Find an available channel
+                channel = pygame.mixer.find_channel()
+                if channel:
+                    channel.play(sound)
+                    logger.debug(f"Playing sound for class {class_id}")
+                else:
+                    logger.warning("No available audio channels")
+            else:
+                logger.warning(f"No sound available for class {class_id}")
+                
+        except Exception as e:
+            logger.error(f"Error playing alert for class {class_id}: {e}")
+    
+    def play_default_alert(self):
+        """Play the default alert sound"""
+        self.play_class_alert('default')  # Use string key for default
+    
+    def stop_all_sounds(self):
+        """Stop all currently playing sounds"""
+        try:
+            pygame.mixer.stop()
+        except Exception as e:
+            logger.error(f"Error stopping sounds: {e}")
+    
+    def get_audio_status(self) -> Dict[str, Any]:
+        """Get current audio system status"""
+        return {
+            'initialized': self._initialized,
+            'sounds_loaded': len(self.sound_library),
+            'active_channels': pygame.mixer.get_num_channels() - pygame.mixer.get_busy(),
+            'class_sounds': list(self.config.class_sound_map.keys())
+        }
+
 class ModelManager:
     """Manages multiple models with fallback functionality"""
     def __init__(self, config: AppConfig):
@@ -640,7 +781,7 @@ class ObjectDetector:
         """Process a single frame for object detection/segmentation"""
         try:
             frame_counts = Counter()
-            special_detections = []  # Store special class detections for conditional processing
+            special_detections = []
             
             # Get current model and its type
             model = self.model_manager.get_current_model()
@@ -655,11 +796,10 @@ class ObjectDetector:
             # Process frame based on model type
             if model_type == 'segmentation':
                 results = model(frame, stream=True, conf=self.config.confidence_threshold)
-            else:  # detection
+            else:
                 results = model(frame, stream=True)
             
             for r in results:
-                # Process boxes for both detection and segmentation
                 if hasattr(r, 'boxes') and r.boxes is not None:
                     for box in r.boxes:
                         conf = float(box.conf[0])
@@ -668,9 +808,9 @@ class ObjectDetector:
                         if conf > self.config.confidence_threshold:
                             class_name = model.names[cls_id]
                             
-                            # Check for alert
+                            # ENHANCED: Play class-specific alert
                             if cls_id in self.config.class_cooldowns and self.alert_manager.should_trigger_alert(cls_id):
-                                self.alert_manager.play_alert()
+                                self.alert_manager.play_alert(cls_id)  # Pass class_id for specific sound
                             
                             # Count the detection
                             frame_counts[class_name] += 1
@@ -682,35 +822,29 @@ class ObjectDetector:
                             if cls_id in self.config.special_classes:
                                 special_detections.append((box, cls_id, conf, class_name))
                             else:
-                                # Draw non-special classes immediately
                                 self.visualizer.draw_detection(frame, box, class_name, conf, cls_id)
                 
                 # Process masks for segmentation models
                 if model_type == 'segmentation' and hasattr(r, 'masks') and r.masks is not None:
                     for i, mask in enumerate(r.masks):
-                        if i < len(r.boxes):  # Ensure we have a corresponding box
+                        if i < len(r.boxes):
                             box = r.boxes[i]
                             conf = float(box.conf[0])
                             cls_id = int(box.cls[0])
                             
                             if conf > self.config.confidence_threshold:
-                                # Draw segmentation mask
                                 self.visualizer.draw_segmentation_mask(frame, mask.data[0], cls_id)
             
-            # Process special class detections for conditional labeling
+            # Process special class detections (conditional logic remains the same)
             special_class_ids = set(cls_id for _, cls_id, _, _ in special_detections)
             
-            # Check for conditional cases
             if special_class_ids == set(self.config.special_classes):
-                # All three special classes detected
                 special_boxes = [box for box, _, _, _ in special_detections]
                 self.visualizer.draw_conditional_bounding_box(frame, special_boxes, "all_three")
             elif len(special_class_ids) == 2:
-                # Exactly two special classes detected
-                special_boxes = [box for box, _, _, _ in special_detections]
+                special_boxes = [box for box, _, _, _, _ in special_detections]
                 self.visualizer.draw_conditional_bounding_box(frame, special_boxes, "two_classes")
             else:
-                # Draw special classes individually if no condition met
                 for box, cls_id, conf, class_name in special_detections:
                     self.visualizer.draw_detection(frame, box, class_name, conf, cls_id)
             
@@ -718,7 +852,7 @@ class ObjectDetector:
             time_window_counts = self.time_window_counter.get_counts()
             time_remaining = self.time_window_counter.get_time_remaining()
             
-            # Prepare and display counts panel in top-right corner
+            # Prepare and display counts panel
             lines = ["Counts (frame):"]
             if frame_counts:
                 for name, cnt in frame_counts.items():
@@ -736,11 +870,13 @@ class ObjectDetector:
                 
             lines.append(f"Reset in: {time_remaining:.1f}s")
                 
-            # Draw counter panel in top-right corner
             self.visualizer.draw_text_panel(frame, lines, 10, 30, 250, right_align=True)
             
-            # Display cooldown status in top-left corner
+            # Display cooldown status
             self.visualizer.draw_cooldown_status(frame, self.alert_manager)
+            
+            # NEW: Display audio status
+            self.visualizer.draw_audio_status(frame, self.alert_manager)
             
             # Display connection status
             is_connected = self.cap.isOpened() and self.consecutive_failures < self.config.max_consecutive_failures
@@ -754,28 +890,24 @@ class ObjectDetector:
                 len(self.model_manager.models)
             )
 
-            # Resize the frame 
-            frame = cv2.resize(frame, (1024, 576)) # Change this to resize the window
-            
+            frame = cv2.resize(frame, (1024, 576))
             return frame
             
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
             self.model_failures += 1
             
-            # Try to switch model if current one is failing
             if self.model_failures >= self.max_model_failures:
                 logger.warning(f"Model failures exceeded threshold, attempting to switch model")
                 if self.model_manager.switch_to_next_model():
-                    self.model_failures = 0  # Reset failure counter
+                    self.model_failures = 0
                 else:
                     logger.error("No alternative models available")
             
-            # Display error on frame
             error_msg = f"Processing Error: {str(e)[:50]}..."
             self.visualizer.draw_error_message(frame, error_msg)
-            return frame
-    
+            return frame 
+ 
     def run(self):
         """Main application loop with reconnection capability"""
         try:
@@ -912,15 +1044,26 @@ def main():
             #Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\segmentation_model.pt"),  # Fallback segmentation model
             #Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\backup_detection_model.pt"),  # Backup detection model
         ]
+
+                # Enhanced audio configuration
+        class_sound_config = {
+            0: Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-09-352705.mp3"),
+            1: Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3"),
+            #2: Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\animal_alert.mp3"),
+            # Add more class-sound mappings as needed
+        }
         
         config = AppConfig(
             model_paths=model_configs,
             camera_source=camera_source,  # Use 0 for webcam or RTSP URL for stream
             frame_width=640,
+            # Enhanced audio configuration
+            class_sound_map=class_sound_config,
+            #default_alert_sound=Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\default_alert.mp3"),            
             frame_height=480,
             confidence_threshold=0.5,
             class_color_map={1: (0, 0, 255), 0: (0, 255, 0)},  # Red, Green
-            alert_sound_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3"),
+            #alert_sound_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3"),
             alert_cooldown=5,
             class_cooldowns={0: 10, 1: 5, 2: 15},
             counter_time_window=10,  # 10-second time window for counter
@@ -934,7 +1077,7 @@ def main():
             model_load_timeout=30,  # Seconds to wait for model to load
             model_retry_interval=5,  # Seconds between model loading retries
             # New frame skipping configuration
-            frame_skip=3,  # Process every 2nd frame (2x performance boost)
+            frame_skip=1,  # Process every 2nd frame (2x performance boost)
             display_every_frame=True,  # Show detections on all frames
             target_fps=30  # Target FPS for display
         )
