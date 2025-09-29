@@ -1149,7 +1149,7 @@ def main():
             logger.warning(f"Camera test failed for index {camera_idx}: {e}")
     
     config = AppConfig(
-        model_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\Segmentation3.torchscript"),
+        model_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\Segmentation4.torchscript"),
         camera_source=camera_source,
         frame_width=640,
         frame_height=480,
