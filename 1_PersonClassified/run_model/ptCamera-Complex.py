@@ -400,10 +400,10 @@ def main():
     # Configuration - change only these values to modify application behavior
     
     # For webcam (default)
-    #camera_source = 0
+    camera_source = 0
     
     # For RTSP stream (uncomment and modify as needed)
-    camera_source = "rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/501"
+    #camera_source = "rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/501"
     
     # Try different camera indices if 0 doesn't work
     #for camera_idx in [0, 1, 2]:
@@ -418,13 +418,13 @@ def main():
     #        pass
     
     config = AppConfig(
-        model_path=Path(r"C:\Farid\Dokumen\Object Detection\CV_model\bestSmallS.torchscript"),
+        model_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestSmallS.torchscript"),
         camera_source=camera_source,  # Use 0 for webcam or RTSP URL for stream
         frame_width=640,
         frame_height=480,
         confidence_threshold=0.5,
         class_color_map={0: (0, 0, 255), 1: (0, 255, 0)},  # Red, Green
-        alert_sound_path=Path(r"C:\Farid\Dokumen\Object Detection\usedAudio\level-up-07-383747.mp3"),
+        alert_sound_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3"),
         alert_cooldown=5,
         class_cooldowns={0: 10, 1: 5, 2: 15},
         counter_time_window=10,  # 10-second time window for counter
