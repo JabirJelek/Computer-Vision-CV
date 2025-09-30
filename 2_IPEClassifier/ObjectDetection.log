@@ -1,0 +1,45 @@
+2025-09-30 14:11:34,072 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript
+2025-09-30 14:11:34,077 - INFO - Model loaded successfully
+2025-09-30 14:11:35,131 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-09-30 14:11:35,136 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-09-30 14:11:35,138 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-09-30 14:11:35,138 - INFO - AudioManager initialized successfully
+2025-09-30 14:11:35,202 - ERROR - Failed to open video source: 1
+2025-09-30 14:11:35,202 - ERROR - Failed to initialize ObjectDetector: Failed to initialize video source
+2025-09-30 14:11:35,203 - CRITICAL - Failed to start application: Failed to initialize video source
+2025-09-30 14:11:41,113 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\HBDetect1.torchscript
+2025-09-30 14:11:41,116 - INFO - Model loaded successfully
+2025-09-30 14:11:42,063 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-09-30 14:11:42,068 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-09-30 14:11:42,069 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-09-30 14:11:42,069 - INFO - AudioManager initialized successfully
+2025-09-30 14:11:43,050 - INFO - Video source initialized: 0
+2025-09-30 14:11:43,051 - INFO - ObjectDetector initialized successfully
+2025-09-30 14:11:57,903 - INFO - Application shut down successfully
+2025-09-30 14:12:19,839 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestSmall.torchscript
+2025-09-30 14:12:19,841 - INFO - Model loaded successfully
+2025-09-30 14:12:20,824 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-09-30 14:12:20,829 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-09-30 14:12:20,830 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-09-30 14:12:20,831 - INFO - AudioManager initialized successfully
+2025-09-30 14:12:21,368 - INFO - Video source initialized: 0
+2025-09-30 14:12:21,368 - INFO - ObjectDetector initialized successfully
+2025-09-30 14:13:16,275 - INFO - Application shut down successfully
+2025-09-30 14:13:20,626 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestSmallS.torchscript
+2025-09-30 14:13:20,628 - INFO - Model loaded successfully
+2025-09-30 14:13:21,584 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-09-30 14:13:21,589 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-09-30 14:13:21,590 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-09-30 14:13:21,590 - INFO - AudioManager initialized successfully
+2025-09-30 14:13:22,111 - INFO - Video source initialized: 0
+2025-09-30 14:13:22,112 - INFO - ObjectDetector initialized successfully
+2025-09-30 14:13:34,082 - INFO - Application shut down successfully
+2025-09-30 14:17:46,386 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestSmallS.torchscript
+2025-09-30 14:17:46,388 - INFO - Model loaded successfully
+2025-09-30 14:17:47,389 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-09-30 14:17:47,394 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-09-30 14:17:47,395 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-09-30 14:17:47,395 - INFO - AudioManager initialized successfully
+2025-09-30 14:17:47,930 - INFO - Video source initialized: 0
+2025-09-30 14:17:47,930 - INFO - ObjectDetector initialized successfully
+2025-09-30 14:18:08,075 - INFO - Application shut down successfully
