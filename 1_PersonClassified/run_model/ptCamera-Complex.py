@@ -418,7 +418,7 @@ def main():
     #        pass
     
     config = AppConfig(
-        model_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestSmallS.torchscript"),
+        model_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\detectMe.torchscript"),
         camera_source=camera_source,  # Use 0 for webcam or RTSP URL for stream
         frame_width=640,
         frame_height=480,
