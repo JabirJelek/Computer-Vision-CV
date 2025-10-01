@@ -1,0 +1,108 @@
+2025-10-01 10:26:39,284 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV1.onnx
+2025-10-01 10:26:39,287 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV1.onnx
+2025-10-01 10:26:40,335 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-10-01 10:26:40,341 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-10-01 10:26:40,343 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-10-01 10:26:40,343 - INFO - AudioManager initialized successfully
+2025-10-01 10:27:06,461 - ERROR - Failed to read test frame from video source
+2025-10-01 10:27:06,461 - ERROR - Failed to initialize ObjectDetector: Failed to initialize video source
+2025-10-01 10:27:06,461 - CRITICAL - Failed to start application: Failed to initialize video source
+2025-10-01 10:27:24,861 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV1.onnx
+2025-10-01 10:27:24,864 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV1.onnx
+2025-10-01 10:27:25,837 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-10-01 10:27:25,842 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-10-01 10:27:25,843 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-10-01 10:27:25,843 - INFO - AudioManager initialized successfully
+2025-10-01 10:27:42,770 - INFO - Video source initialized: rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/101
+2025-10-01 10:27:42,771 - INFO - ObjectDetector initialized successfully
+2025-10-01 10:27:59,448 - INFO - Application shut down successfully
+2025-10-01 10:42:19,724 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV1.onnx
+2025-10-01 10:42:19,726 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV1.onnx
+2025-10-01 10:42:20,719 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-10-01 10:42:20,725 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-10-01 10:42:20,725 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-10-01 10:42:20,726 - INFO - AudioManager initialized successfully
+2025-10-01 10:42:30,679 - ERROR - Failed to read test frame from video source
+2025-10-01 10:42:30,679 - ERROR - Failed to initialize ObjectDetector: Failed to initialize video source
+2025-10-01 10:42:30,680 - CRITICAL - Failed to start application: Failed to initialize video source
+2025-10-01 10:42:41,568 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV1.onnx
+2025-10-01 10:42:41,570 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV1.onnx
+2025-10-01 10:42:42,557 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-10-01 10:42:42,562 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-10-01 10:42:42,563 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-10-01 10:42:42,563 - INFO - AudioManager initialized successfully
+2025-10-01 10:43:05,844 - INFO - Video source initialized: rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/101
+2025-10-01 10:43:05,845 - INFO - ObjectDetector initialized successfully
+2025-10-01 10:43:43,346 - INFO - Application shut down successfully
+2025-10-01 10:44:22,779 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV2.onnx
+2025-10-01 10:44:22,782 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV2.onnx
+2025-10-01 10:44:23,777 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-10-01 10:44:23,782 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-10-01 10:44:23,783 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-10-01 10:44:23,783 - INFO - AudioManager initialized successfully
+2025-10-01 10:44:27,701 - INFO - Video source initialized: rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/101
+2025-10-01 10:44:27,702 - INFO - ObjectDetector initialized successfully
+2025-10-01 10:44:56,407 - INFO - Application shut down successfully
+2025-10-01 10:47:39,392 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV2.onnx
+2025-10-01 10:47:39,394 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV2.onnx
+2025-10-01 10:47:40,375 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-10-01 10:47:40,380 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-10-01 10:47:40,381 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-10-01 10:47:40,381 - INFO - AudioManager initialized successfully
+2025-10-01 10:48:09,021 - ERROR - Failed to read test frame from video source
+2025-10-01 10:48:09,022 - ERROR - Failed to initialize ObjectDetector: Failed to initialize video source
+2025-10-01 10:48:09,022 - CRITICAL - Failed to start application: Failed to initialize video source
+2025-10-01 10:48:25,912 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV2.onnx
+2025-10-01 10:48:25,915 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV2.onnx
+2025-10-01 10:48:26,896 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-10-01 10:48:26,901 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-10-01 10:48:26,902 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-10-01 10:48:26,902 - INFO - AudioManager initialized successfully
+2025-10-01 10:48:27,431 - ERROR - Failed to open video source: rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/101
+2025-10-01 10:48:27,431 - ERROR - Failed to initialize ObjectDetector: Failed to initialize video source
+2025-10-01 10:48:27,431 - CRITICAL - Failed to start application: Failed to initialize video source
+2025-10-01 10:48:50,081 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV2.onnx
+2025-10-01 10:48:50,084 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV2.onnx
+2025-10-01 10:48:51,069 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-10-01 10:48:51,073 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-10-01 10:48:51,074 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-10-01 10:48:51,074 - INFO - AudioManager initialized successfully
+2025-10-01 10:49:03,868 - INFO - Video source initialized: rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/101
+2025-10-01 10:49:03,868 - INFO - ObjectDetector initialized successfully
+2025-10-01 10:49:34,452 - INFO - Application shut down successfully
+2025-10-01 10:51:44,083 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV1.onnx
+2025-10-01 10:51:44,086 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV1.onnx
+2025-10-01 10:51:45,085 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-10-01 10:51:45,090 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-10-01 10:51:45,091 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-10-01 10:51:45,091 - INFO - AudioManager initialized successfully
+2025-10-01 10:51:46,361 - INFO - Video source initialized: rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/101
+2025-10-01 10:51:46,362 - INFO - ObjectDetector initialized successfully
+2025-10-01 10:51:52,698 - INFO - Application shut down successfully
+2025-10-01 10:54:00,267 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV2.onnx
+2025-10-01 10:54:00,269 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV2.onnx
+2025-10-01 10:54:01,249 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-10-01 10:54:01,254 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-10-01 10:54:01,255 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-10-01 10:54:01,255 - INFO - AudioManager initialized successfully
+2025-10-01 10:54:02,281 - INFO - Video source initialized: rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/101
+2025-10-01 10:54:02,282 - INFO - ObjectDetector initialized successfully
+2025-10-01 10:54:07,849 - INFO - Application shut down successfully
+2025-10-01 11:10:43,872 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV2.onnx
+2025-10-01 11:10:43,878 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV2.onnx
+2025-10-01 11:10:44,897 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-10-01 11:10:44,902 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-10-01 11:10:44,904 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-10-01 11:10:44,904 - INFO - AudioManager initialized successfully
+2025-10-01 11:11:02,974 - INFO - Video source initialized: rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/101
+2025-10-01 11:11:02,974 - INFO - ObjectDetector initialized successfully
+2025-10-01 11:11:34,339 - INFO - Application shut down successfully
+2025-10-01 11:16:53,242 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV2.onnx
+2025-10-01 11:16:53,244 - INFO - Successfully loaded detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV2.onnx
+2025-10-01 11:16:54,241 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-10-01 11:16:54,246 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-10-01 11:16:54,247 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-10-01 11:16:54,247 - INFO - AudioManager initialized successfully
+2025-10-01 11:16:55,858 - INFO - Video source initialized: rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/101
+2025-10-01 11:16:55,859 - INFO - ObjectDetector initialized successfully
+2025-10-01 11:17:13,709 - INFO - Application shut down successfully
