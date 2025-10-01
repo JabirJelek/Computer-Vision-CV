@@ -82,22 +82,21 @@ class RTSPDetector:
     
     def display_info_panel(self, frame, frame_counts):
         """Display information panel with detection counts"""
+        # Build the lines for the panel
         lines = ["Real-time Counts:"]
         
-        # Add frame counts
+        # Corrected: Use a conditional expression for the entire list
         if frame_counts:
-            for name, count in frame_counts.items():
-                lines.append(f"{name}: {count}")
+            lines.extend([f"{name}: {count}" for name, count in frame_counts.items()])
         else:
             lines.append("None detected")
         
         lines.append("")
         lines.append("Cumulative Counts:")
         
-        # Add cumulative counts
+        # Apply the same correction for cumulative_counts
         if self.cumulative_counts:
-            for name, count in self.cumulative_counts.items():
-                lines.append(f"{name}: {count}")
+            lines.extend([f"{name}: {count}" for name, count in self.cumulative_counts.items()])
         else:
             lines.append("None detected")
         
@@ -111,15 +110,15 @@ class RTSPDetector:
         # Create semi-transparent background
         overlay = frame.copy()
         cv2.rectangle(overlay, (x0 - padding//2, y0 - line_height),
-                     (x0 + panel_width, y0 - line_height + panel_height), 
-                     (0, 0, 0), -1)
+                    (x0 + panel_width, y0 - line_height + panel_height), 
+                    (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
         
         # Add text
         y_offset = y0
         for line in lines:
             cv2.putText(frame, line, (x0, y_offset),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
             y_offset += line_height
     
     def run(self, reconnect_delay=5):
@@ -170,7 +169,7 @@ class RTSPDetector:
 
 def main():
     # Configuration
-    MODEL_PATH = r"C:\Farid\Dokumen\Object Detection\1_PersonClassified\CV_model\CCTV.torchscript"
+    MODEL_PATH = r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV1.onnx"
     RTSP_URL = "rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/101"
     CONF_THRESHOLD = 0.5
     
