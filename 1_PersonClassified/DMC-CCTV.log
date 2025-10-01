@@ -1,0 +1,9 @@
+2025-10-01 11:58:16,093 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\best_full_integer_quant.tflite
+2025-10-01 11:58:16,098 - INFO - Model loaded successfully
+2025-10-01 11:58:17,058 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-10-01 11:58:17,064 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-10-01 11:58:17,065 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-10-01 11:58:17,066 - INFO - AudioManager initialized successfully
+2025-10-01 11:58:19,718 - INFO - Video source initialized: rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/101
+2025-10-01 11:58:19,720 - INFO - ObjectDetector initialized successfully
+2025-10-01 11:59:33,992 - INFO - Application shut down successfully
