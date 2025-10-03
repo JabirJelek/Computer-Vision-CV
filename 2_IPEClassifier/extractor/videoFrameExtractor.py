@@ -60,7 +60,7 @@ def main():
     parser.add_argument("video", help="Input video file path")
     parser.add_argument("-o", "--output", help="Output directory (default: frames_<filename>)")
     parser.add_argument("-f", "--fps", type=float, default=2, help="Frames per second to extract (default: 1)")
-    parser.add_argument("-fmt", "--format", default="jpg", choices=["jpg", "png"], help="Output image format (default: jpg)")
+    parser.add_argument("-fmt", "--format", default="png", choices=["jpg", "png"], help="Output image format (default: jpg)")
     parser.add_argument("-q", "--quality", type=int, default=2, help="JPEG quality (1-31, 2=best, default: 2)")
     parser.add_argument("-p", "--prefix", default="frame", help="Filename prefix (default: frame)")
 
