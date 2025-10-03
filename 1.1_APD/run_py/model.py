@@ -30,7 +30,7 @@ def predict_and_detect(chosen_model, img, conf=0.5):
 
 # Load model and video
 model = YOLO(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\v2-apd.torchscript")
-video_path = r"D:\RaihanFarid\Dokumen\Object Detection\1.1_APD\extractor\apd.mp4"
+video_path = r"D:\RaihanFarid\Dokumen\Object Detection\history_dataset\3-APDDetection\apd.mp4"
 cap = cv2.VideoCapture(video_path)
 
 # Setup VideoWriter to save the result
