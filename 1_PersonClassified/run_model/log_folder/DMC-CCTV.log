@@ -998,3 +998,21 @@
 2025-10-02 15:17:34,033 - WARNING - From D:\RaihanFarid\Dokumen\Object Detection\onnx\Lib\site-packages\ultralytics\nn\autobackend.py:429: The name tf.wrap_function is deprecated. Please use tf.compat.v1.wrap_function instead.
 
 2025-10-02 15:17:51,180 - INFO - Application shut down successfully
+2025-10-02 17:16:00,779 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV2.onnx
+2025-10-02 17:16:00,782 - INFO - Model loaded successfully
+2025-10-02 17:16:01,787 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-10-02 17:16:01,793 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-10-02 17:16:01,794 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-10-02 17:16:01,794 - INFO - AudioManager initialized successfully
+2025-10-02 17:16:02,995 - INFO - Video source initialized: rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/101
+2025-10-02 17:16:02,995 - INFO - ObjectDetector initialized successfully
+2025-10-02 17:16:11,875 - INFO - Application shut down successfully
+2025-10-02 17:16:21,527 - INFO - Loading detection model: D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV1.onnx
+2025-10-02 17:16:21,529 - INFO - Model loaded successfully
+2025-10-02 17:16:22,468 - INFO - Loaded sound for class 0: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\positive-notification-alert-351299.mp3
+2025-10-02 17:16:22,473 - INFO - Loaded sound for class 1: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\new-notification-026-380249.mp3
+2025-10-02 17:16:22,474 - INFO - Loaded default sound: D:\RaihanFarid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3
+2025-10-02 17:16:22,474 - INFO - AudioManager initialized successfully
+2025-10-02 17:16:23,466 - INFO - Video source initialized: rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/101
+2025-10-02 17:16:23,467 - INFO - ObjectDetector initialized successfully
+2025-10-02 17:16:40,926 - INFO - Application shut down successfully
