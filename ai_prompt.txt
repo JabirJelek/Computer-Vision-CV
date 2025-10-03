@@ -1,0 +1,46 @@
+**CONTEXT PRESERVATION REQUEST**
+
+I'm continuing a previous conversation about computer vision architecture. Please maintain context from this discussion:
+
+**Previous Topic**: Selective frame processing architecture with two threads:
+1. **Capture Thread**: Continuous frame capture with single-frame buffer
+2. **Processing Thread**: Fixed-interval frame sampling for reduced CPU usage
+
+**Key Technical Details**:
+- Single-frame buffer (automatically drops unnecessary frames)
+- Processing at fixed time intervals instead of frame counting
+- Thread synchronization with locks
+- Massive CPU reduction (93%+ when processing 2fps vs 30fps capture)
+- Modular `SelectiveFrameProcessor` class implementation
+
+**Current Implementation Status**:
+We've implemented a working selective frame processor with:
+- Continuous capture thread keeping only latest frame
+- Processing thread sampling at configurable intervals
+- Real-time display with frame information overlay
+- Dynamic interval adjustment capability
+
+**When I return, I may want to**:
+- Optimize the implementation further
+- Add specific computer vision processing
+- Extend the architecture with additional features
+- Discuss performance tuning or alternative approaches
+
+Please maintain this technical context and be ready to continue development discussions.
+
+
+Alternative Shorter Version:
+text
+
+**TECHNICAL CONTEXT PRESERVATION**
+
+Continuing computer vision discussion: Selective frame processing architecture with capture thread (continuous) + processing thread (fixed intervals). Single-frame buffer automatically drops unnecessary frames. Current implementation uses `SelectiveFrameProcessor` class with configurable sampling intervals.
+
+Maintain context about thread synchronization, CPU reduction benefits, and modular design for when I return with questions or extensions.
+
+--------------
+
+Above prompt is about me talking about CV multi-threading.
+
+
+--------------
