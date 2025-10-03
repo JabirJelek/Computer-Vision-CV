@@ -12,7 +12,7 @@ from typing import Dict, Tuple, Any, Union
 class AppConfig:
     """Centralized configuration for the application"""
     # Model configuration
-    model_path: Path = Path(r"C:\Farid\Dokumen\Object Detection\CV_model\task1.torchscript")
+    model_path: Path = Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestSmallS.torchscript")
     
     # Video source configuration - can be camera index (0, 1, 2) or RTSP URL
     camera_source: Union[int, str] = 0  # Can be 0 for webcam or "rtsp://..." for RTSP
@@ -24,7 +24,7 @@ class AppConfig:
     class_color_map: Dict[int, Tuple[int, int, int]] = None
     
     # Alert configuration
-    alert_sound_path: Path = Path(r"C:\Farid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3")
+    #alert_sound_path: Path = Path(r"C:\Farid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3")
     alert_cooldown: int = 5
     class_cooldowns: Dict[int, int] = None
     
@@ -418,13 +418,13 @@ def main():
             pass
     
     config = AppConfig(
-        model_path=Path(r"C:\Farid\Dokumen\Object Detection\CV_model\task1.torchscript"),
+        model_path=Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestSmallS.torchscript"),
         camera_source=camera_source,  # Use 0 for webcam or RTSP URL for stream
         frame_width=640,
         frame_height=480,
         confidence_threshold=0.5,
         class_color_map={0: (0, 0, 255), 1: (0, 255, 0)},  # Red, Green
-        alert_sound_path=Path(r"C:\Farid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3"),
+        #alert_sound_path=Path(r"C:\Farid\Dokumen\Object Detection\usedAudio\notification-alert-269289.mp3"),
         alert_cooldown=5,
         class_cooldowns={0: 10, 1: 5, 2: 15},
         counter_time_window=10,  # 10-second time window for counter
