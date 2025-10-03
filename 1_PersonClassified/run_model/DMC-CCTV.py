@@ -16,7 +16,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("ObjectDetection.log"),
+        logging.FileHandler("DMC-CCTV.log"),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -838,7 +838,7 @@ def main():
                 "two_classes": (255, 0, 255)
             },
             class_sound_map=class_sound_config,
-            frame_skip=1,
+            frame_skip=100,
             display_every_frame=True,
             target_fps=30
         )
