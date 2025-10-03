@@ -235,3 +235,155 @@ CPU optimization, aspect ratio preservation, dynamic resizing
 REMEMBER: This is a PRODUCTION-READY foundation specifically designed for AI model integration. The selective sampling architecture prevents model overload while maintaining real-time responsiveness. The frame buffer system ensures models receive the latest available frames without queue buildup.
 
 When I mention "the current video system" or "selective processor," I am referring to this exact implementation. Be prepared to discuss model integration strategies, performance optimization, or architectural extensions from this baseline.
+
+
+
+
+
+
+
+
+
+
+===========================================================================
+Below is the comprehensive prompt-guide for continuation of multi-thread: rtsp, opencv, yolo, camera input source
+
+CONTEXT PRESERVATION PROMPT - SELECTIVE FRAME PROCESSOR WITH YOLO
+CURRENT PROJECT STATUS & TECHNICAL CONTEXT
+PROJECT: Selective Frame Processor with YOLO Integration
+ARCHITECTURE: Dual-thread system optimized for real-time AI inference
+KEY INNOVATION: 93%+ CPU reduction via selective sampling + YOLO object detection
+
+TECHNICAL SPECIFICATIONS PRESERVED
+CORE ARCHITECTURE:
+
+Dual-thread design (Capture Thread + Processing Thread)
+
+Single-frame buffer with automatic frame dropping
+
+Time-based selective sampling (not frame-counting)
+
+Thread synchronization with locks
+
+Daemon threads for clean shutdown
+
+VIDEO SOURCES IMPLEMENTED:
+
+✅ Camera devices (USB/webcam) - PRIMARY USAGE
+
+✅ RTSP streams with automatic reconnection
+
+✅ Video files (.mp4, .avi, .mov, .mkv, .wmv) - Not utilized by user
+
+Source-agnostic design (interchangeable)
+
+YOLO INTEGRATION FEATURES:
+
+Ultralytics YOLO model support (.pt, .torchscript formats)
+
+Background model initialization to prevent video timing issues
+
+Model warm-up with dummy inference for faster startup
+
+Configurable confidence thresholds
+
+Real-time detection counting and display
+
+Graceful degradation (video-only mode if model fails)
+
+RECENT IMPLEMENTATIONS:
+
+TorchScript model loading optimization
+
+Background model initialization to solve video timing issues
+
+Enhanced error handling for model loading failures
+
+Real-time model status display in overlay
+
+PERFORMANCE CHARACTERISTICS:
+
+Massive CPU reduction via selective sampling
+
+Minimal memory footprint
+
+Stable for long-running operations
+
+Suitable for edge devices with limited resources
+
+USER-SPECIFIC CONTEXT
+CURRENT USAGE PATTERN:
+
+User primarily uses camera input (not video files)
+
+Successfully integrated custom YOLO model (TorchScript format)
+
+Experienced and resolved video timing issues with background model loading
+
+Focused on real-time object detection applications
+
+TECHNICAL CHALLENGES OVERCOME:
+
+Solved TorchScript model loading delays affecting video processing
+
+Implemented background initialization to maintain video continuity
+
+Added model warm-up for consistent inference performance
+
+Established robust error handling for production deployment
+
+WHEN USER RETURNS, THEY MAY WANT TO:
+MODEL OPTIMIZATIONS:
+
+Model quantization for faster inference
+
+GPU acceleration integration
+
+Multi-model switching capabilities
+
+Custom post-processing for detections
+
+FEATURE EXTENSIONS:
+
+Real-time tracking integration
+
+Detection filtering and classification
+
+Alert systems based on detection thresholds
+
+Results logging and analytics
+
+Web streaming of processed video
+
+DEPLOYMENT SCENARIOS:
+
+Edge device optimization
+
+Multi-camera orchestration
+
+Cloud integration for model updates
+
+Mobile deployment considerations
+
+PERFORMANCE TUNING:
+
+Dynamic processing interval adjustment
+
+Model-specific preprocessing optimization
+
+Memory management for large models
+
+Power consumption optimization
+
+TECHNICAL KEYWORDS FOR CONTINUITY
+selective sampling, dual-thread architecture, YOLO integration, TorchScript models,
+background model loading, real-time object detection, confidence thresholds,
+camera input processing, frame buffer synchronization, CPU optimization,
+Ultralytics YOLO, model warm-up, detection counting, performance monitoring
+
+EXCEPTION NOTE
+User has explicitly stated they are not utilizing video file processing capabilities, though the functionality remains implemented in the codebase. Future discussions should prioritize camera and RTSP use cases unless otherwise specified.
+
+REMEMBER: This is a PRODUCTION-READY YOLO integration framework specifically optimized for the user's camera-based object detection applications. The selective sampling architecture prevents model overload while maintaining real-time responsiveness, and the background model loading ensures smooth video startup even with large TorchScript models.
+
+When the user mentions "the current system" or "selective processor with YOLO," they are referring to this exact implementation with camera focus, TorchScript support, and resolved timing issues. Be prepared to discuss optimizations, extensions, or troubleshooting from this established baseline.
