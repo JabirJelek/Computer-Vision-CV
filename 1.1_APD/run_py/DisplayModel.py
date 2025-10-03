@@ -7,13 +7,13 @@ CLASS_CONFIG = {
     'person_with_helmet_forklift': {
         'display': True,
         'color': (0, 0, 255),  # Red
-        'placeholder': 'NO MASK ALERT!',
+        'placeholder': 'NO MASK USED ALERT!',
         'box_thickness': 3
     },
     'person_with_mask_forklift': {
         'display': True,
         'color': (0, 0, 255),  # Red
-        'placeholder': 'NO HELMET ALERT!',
+        'placeholder': 'NO HELMET USED ALERT!',
         'box_thickness': 3
     },
     'person_without_mask_helmet_forklift': {
@@ -25,7 +25,7 @@ CLASS_CONFIG = {
     'person_without_mask_nonForklift': {
         'display': True,
         'color': (0, 0, 255),  # Red
-        'placeholder': 'NO MASK ALERT!',
+        'placeholder': 'NO MASK USED ALERT!',
         'box_thickness': 3
     },
     # Add other classes here if you want to display them with different settings
