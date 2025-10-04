@@ -247,7 +247,7 @@ When I mention "the current video system" or "selective processor," I am referri
 
 ===========================================================================
 Below is the comprehensive prompt-guide for continuation of multi-thread: rtsp, opencv, yolo, camera input source
-This prompt after saving the file: ...COMPLETED_threading.py
+This prompt after saving the file: ...STABLE_threading.py
 
 CONTEXT PRESERVATION PROMPT - SELECTIVE FRAME PROCESSOR WITH YOLO
 CURRENT PROJECT STATUS & TECHNICAL CONTEXT
