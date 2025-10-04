@@ -38,7 +38,7 @@ class SelectiveFrameProcessor:
         self.display_width = display_width
         self.conf_threshold = conf_threshold
 
-            # Initialize logging system
+        # Initialize logging system
         self.log_file = log_file
         self._initialize_logging()
         
@@ -120,51 +120,44 @@ class SelectiveFrameProcessor:
                 
         except Exception as e:
             print(f"Logging error: {e}")  # Silent fail - don't break main functionality
-            
-    def _log_detection(self, class_id, class_name, confidence, frame_num, is_alert=False):
-        """Log detection event to file"""
-        try:
-            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-            alert_flag = "YES" if is_alert else "NO"
-            
-            log_entry = f"{timestamp},{frame_num},{class_id},{class_name},{confidence:.3f},{alert_flag}\n"
-            
-            with open(self.log_file, 'a') as f:
-                f.write(log_entry)
-                
-        except Exception as e:
-            print(f"Logging error: {e}")  # Silent fail - don't break main functionality
-
         
-    def _initialize_alert_classes(self):
-        """Initialize alert classes from configuration file"""
+    def _initialize_alert_classes(self, alert_classes_path):
+        """Initialize alert classes with individual cooldown times"""
         alert_classes = {}
+        class_cooldowns = {}  # New: Store per-class cooldowns
         
-        if self.alert_classes_path and os.path.exists(self.alert_classes_path):
+        if alert_classes_path and os.path.exists(alert_classes_path):
             try:
-                with open(self.alert_classes_path, 'r') as f:
-                    for line in f:
+                with open(alert_classes_path, 'r') as f:
+                    for line_num, line in enumerate(f, 1):
                         line = line.strip()
                         if line and not line.startswith('#'):
                             parts = line.split(':')
-                            if len(parts) == 2:
+                            if len(parts) >= 2:
                                 class_id = int(parts[0].strip())
                                 class_name = parts[1].strip()
+                                
+                                # Get cooldown time (default to 5 seconds if not specified)
+                                cooldown = int(parts[2].strip()) if len(parts) >= 3 and parts[2].strip() else 5
+                                
                                 alert_classes[class_id] = class_name
+                                class_cooldowns[class_id] = cooldown
+                                
+                                print(f"  - Class {class_id}: {class_name} (cooldown: {cooldown}s)")
                 
-                print(f"Loaded {len(alert_classes)} alert classes from {self.alert_classes_path}")
-                for class_id, class_name in alert_classes.items():
-                    print(f"  - Class {class_id}: {class_name}")
-                    
+                # Store class_cooldowns as instance variable
+                self.class_cooldowns = class_cooldowns
+                print(f"Loaded {len(alert_classes)} alert classes with individual cooldowns")
+                
             except Exception as e:
                 print(f"Error loading alert classes: {e}")
-                print("Continuing without alert classes")
+                # Fallback to default cooldown
+                self.class_cooldowns = {}
         else:
             print("No alert classes configuration file provided. Alerts disabled.")
-            if self.alert_classes_path:
-                print(f"Alert classes path was: {self.alert_classes_path}")
+            self.class_cooldowns = {}
         
-        return alert_classes
+        return alert_classes 
     
     def _initialize_model(self):
         """Initialize YOLO model with error handling"""
@@ -189,7 +182,7 @@ class SelectiveFrameProcessor:
             return YOLO("yolo11n.pt")  # Ultimate fallback:cite[1]
 
     def _check_alerts(self, results, frame_num):
-        """Check detections against alert classes and trigger alerts if needed"""
+        """Check detections against alert classes using individual cooldowns"""
         current_time = time.time()
         newly_triggered = set()
         
@@ -205,14 +198,17 @@ class SelectiveFrameProcessor:
                 else:
                     class_name = f"class_{class_id}"
                 
-                # Log ALL detections (not just alert classes)
+                # Log ALL detections
                 self._log_detection(class_id, class_name, confidence, frame_num, is_alert=False)
                 
                 # Check if this class is in our alert classes
                 if class_id in self.alert_classes:
+                    # Get cooldown for this specific class (default to 5 seconds)
+                    class_cooldown = self.class_cooldowns.get(class_id, 5)
+                    
                     # Check cooldown for this class
                     last_alert = self.alert_cooldown.get(class_id, 0)
-                    if current_time - last_alert >= self.alert_cooldown_duration:
+                    if current_time - last_alert >= class_cooldown:
                         # Trigger alert
                         alert_class_name = self.alert_classes[class_id]
                         newly_triggered.add(class_id)
@@ -221,40 +217,39 @@ class SelectiveFrameProcessor:
                         # Log the alert
                         self._log_detection(class_id, alert_class_name, confidence, frame_num, is_alert=True)
                         
-                        # Print alert message
-                        alert_msg = f"🚨 ALERT: {alert_class_name} detected (Confidence: {confidence:.2f})"
+                        # Print alert message with cooldown info
+                        alert_msg = f"🎬 VIDEO ALERT: {alert_class_name} detected (Confidence: {confidence:.2f}, Cooldown: {class_cooldown}s)"
                         print(alert_msg)
             
             # Update active alerts
-            self.active_alerts = newly_triggered  
+            self.active_alerts = newly_triggered           
 
-    def _run_yolo_detection(self, frame, frame_num):
-        """Run YOLO object detection on a single frame"""
-        try:
-            # Run YOLO inference:cite[1]
-            results = self.model.predict(
-                source=frame,
-                conf=self.conf_threshold,
-                verbose=False  # Set to True for detailed inference info
-            )
-            
-            # Check for alerts
-            self._check_alerts(results, frame_num)
-            
-            # Process results
-            if results and len(results) > 0:
-                # Annotate frame with detections:cite[1]
-                annotated_frame = results[0].plot()
-                detections_count = len(results[0].boxes) if results[0].boxes else 0
-                self.detection_count += detections_count
-                return annotated_frame, detections_count
-            
-            return frame, 0
-            
-        except Exception as e:
-            print(f"YOLO inference error: {e}")
-            return frame, 0             
+    def set_class_cooldown(self, class_id, cooldown_seconds):
+        """Dynamically change cooldown for a specific class"""
+        if class_id in self.alert_classes:
+            self.class_cooldowns[class_id] = max(1, cooldown_seconds)
+            print(f"Cooldown for class {class_id} ({self.alert_classes[class_id]}) changed to {cooldown_seconds} seconds")
+        else:
+            print(f"Warning: Class ID {class_id} not found in alert classes")
 
+    def set_global_cooldown(self, cooldown_seconds):
+        """Set default cooldown for all classes"""
+        default_cooldown = max(1, cooldown_seconds)
+        for class_id in self.alert_classes:
+            self.class_cooldowns[class_id] = default_cooldown
+        print(f"Global cooldown set to {cooldown_seconds} seconds for all classes")
+
+    def get_cooldown_info(self):
+        """Get current cooldown configuration"""
+        cooldown_info = {}
+        for class_id, class_name in self.alert_classes.items():
+            cooldown = self.class_cooldowns.get(class_id, 5)
+            cooldown_info[class_id] = {
+                'class_name': class_name,
+                'cooldown_seconds': cooldown,
+                'last_alert': self.alert_cooldown.get(class_id, 'Never')
+            }
+        return cooldown_info
 
     def _add_info_overlay(self, frame, frame_num, processed_count, detections_count):
         """Add informational text overlay to the frame with YOLO-specific info"""
@@ -295,6 +290,7 @@ class SelectiveFrameProcessor:
                   cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
         cv.putText(frame, "Press ESC to exit", (10, 190), 
                   cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
+    
     def start(self):
         """Start both capture and processing threads"""
         self.running = True
@@ -449,6 +445,7 @@ class SelectiveFrameProcessor:
                 last_processing_time = current_time
                 
             time.sleep(0.001)          
+    
     def _resize_frame(self, frame):
         """Resize frame to display dimensions maintaining aspect ratio"""
         return cv.resize(frame, (self.display_width, self.display_height))
@@ -525,15 +522,324 @@ class SelectiveFrameProcessor:
         print("Alert classes reloaded")
 
 
+
+class VideoFileProcessor:
+    """
+    Single-threaded video file processor with YOLO object detection and alert system
+    Uses sequential processing to avoid threading complexities
+    """
+    
+    def __init__(self, video_path, processing_interval=0.5, display_width=640,
+                 model_path="path/to/your/model.pt", conf_threshold=0.5, 
+                 alert_classes_path=None, log_file="video_detection_log.txt"):
+        """
+        Args:
+            video_path: Path to video file (.mp4, .avi, .mov, .mkv, .wmv)
+            processing_interval: Time in seconds between processing frames
+            display_width: Width for resizing display frame
+            model_path: Path to YOLO model weights
+            conf_threshold: Confidence threshold for YOLO detections
+            alert_classes_path: Path to alert classes configuration file
+            log_file: Log file for detections
+        """
+        self.video_path = video_path
+        self.processing_interval = processing_interval
+        self.display_width = display_width
+        self.conf_threshold = conf_threshold
+        self.log_file = log_file
+        
+        # Initialize components (reusing your existing methods)
+        self._initialize_logging()
+        self.model = self._initialize_model(model_path)
+        self.alert_classes = self._initialize_alert_classes(alert_classes_path)
+        
+        # Alert system state
+        self.alert_cooldown = {}
+        self.alert_cooldown_duration = 5
+        self.active_alerts = set()  # Tracks currently active alert classes
+        self.detection_count = 0
+        
+        # Video properties (will be set when video is opened)
+        self.frame_width = 0
+        self.frame_height = 0
+        self.display_height = 0
+        self.video_fps = 0
+        self.total_frames = 0
+        
+    def _initialize_logging(self):
+        """Initialize logging system (same as your existing method)"""
+        try:
+            if not os.path.exists(self.log_file):
+                with open(self.log_file, 'w') as f:
+                    f.write("Timestamp,Frame_Number,Class_ID,Class_Name,Confidence,Alert_Triggered\n")
+            print(f"Video logging enabled: {self.log_file}")
+        except Exception as e:
+            print(f"Video log initialization warning: {e}")
+
+    def _log_detection(self, class_id, class_name, confidence, frame_num, is_alert=False):
+        """Log detection event to file (same as your existing method)"""
+        try:
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            alert_flag = "YES" if is_alert else "NO"
+            log_entry = f"{timestamp},{frame_num},{class_id},{class_name},{confidence:.3f},{alert_flag}\n"
+            
+            with open(self.log_file, 'a') as f:
+                f.write(log_entry)
+        except Exception as e:
+            print(f"Video logging error: {e}")
+
+    def _initialize_model(self, model_path):
+        """Initialize YOLO model (adapted from your existing method)"""
+        try:
+            placeholder_path = Path(model_path)
+            
+            if not placeholder_path.exists():
+                print(f"Warning: Model path '{model_path}' does not exist.")
+                print("Using pretrained YOLO11n model as placeholder.")
+                model = YOLO("yolo11n.pt")
+            else:
+                model = YOLO(model_path)
+            
+            print(f"YOLO model loaded for video processing: {model.__class__.__name__}")
+            return model
+            
+        except Exception as e:
+            print(f"Error loading YOLO model for video: {e}")
+            print("Falling back to pretrained YOLO11n model")
+            return YOLO("yolo11n.pt")
+
+    def _initialize_alert_classes(self, alert_classes_path):
+        """Initialize alert classes (same as your existing method)"""
+        alert_classes = {}
+        
+        if alert_classes_path and os.path.exists(alert_classes_path):
+            try:
+                with open(alert_classes_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            parts = line.split(':')
+                            if len(parts) == 2:
+                                class_id = int(parts[0].strip())
+                                class_name = parts[1].strip()
+                                alert_classes[class_id] = class_name
+                
+                print(f"Loaded {len(alert_classes)} alert classes for video processing")
+                for class_id, class_name in alert_classes.items():
+                    print(f"  - Class {class_id}: {class_name}")
+                    
+            except Exception as e:
+                print(f"Error loading alert classes for video: {e}")
+                print("Continuing without alert classes")
+        else:
+            print("No alert classes configuration file provided for video. Alerts disabled.")
+        
+        return alert_classes
+
+    def _check_alerts(self, results, frame_num):
+        """Check detections against alert classes and update active alerts"""
+        current_time = time.time()
+        currently_detected = set()  # Track all alert-class objects found in THIS FRAME
+        
+        if results and len(results) > 0 and results[0].boxes:
+            for box in results[0].boxes:
+                class_id = int(box.cls.item())
+                confidence = box.conf.item()
+                
+                # Get class name from model names
+                class_name = "unknown"
+                if hasattr(self.model, 'names') and self.model.names:
+                    class_name = self.model.names.get(class_id, f"class_{class_id}")
+                else:
+                    class_name = f"class_{class_id}"
+                
+                # Log ALL detections
+                self._log_detection(class_id, class_name, confidence, frame_num, is_alert=False)
+                
+                # Check if this class is in our alert classes
+                if class_id in self.alert_classes:
+                    # Add to currently detected set for active tracking
+                    currently_detected.add(class_id)
+                    
+                    # Check cooldown for this class for alert triggering
+                    last_alert = self.alert_cooldown.get(class_id, 0)
+                    if current_time - last_alert >= self.alert_cooldown_duration:
+                        # Trigger alert
+                        alert_class_name = self.alert_classes[class_id]
+                        self.alert_cooldown[class_id] = current_time
+                        
+                        # Log the alert
+                        self._log_detection(class_id, alert_class_name, confidence, frame_num, is_alert=True)
+                        
+                        # Print alert message
+                        alert_msg = f"🎬 VIDEO ALERT: {alert_class_name} detected (Confidence: {confidence:.2f})"
+                        print(alert_msg)
+        
+        # Update active_alerts: shows what's currently detected in this frame
+        # This replaces the old set with current detections
+        self.active_alerts = currently_detected
+
+    def _run_yolo_detection(self, frame, frame_num):
+        """Run YOLO object detection on a single frame (same as your existing method)"""
+        try:
+            # Run YOLO inference
+            results = self.model.predict(
+                source=frame,
+                conf=self.conf_threshold,
+                verbose=False
+            )
+            
+            # Check for alerts
+            self._check_alerts(results, frame_num)
+            
+            # Process results
+            if results and len(results) > 0:
+                # Annotate frame with detections
+                annotated_frame = results[0].plot()
+                detections_count = len(results[0].boxes) if results[0].boxes else 0
+                self.detection_count += detections_count
+                return annotated_frame, detections_count
+            
+            return frame, 0
+            
+        except Exception as e:
+            print(f"Video YOLO inference error: {e}")
+            return frame, 0
+
+    def _add_info_overlay(self, frame, frame_num, processed_count, detections_count):
+        """Add informational overlay (adapted from your existing method)"""
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Scale font size based on display width
+        font_scale = 0.5 if self.display_width <= 640 else 0.7
+        thickness = 1 if self.display_width <= 640 else 2
+        
+        # Video-specific overlay
+        cv.putText(frame, f"Source: Video File", (10, 25), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 255), thickness)
+        cv.putText(frame, f"Frame: {frame_num}/{self.total_frames}", (10, 45), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0), thickness)
+        cv.putText(frame, f"Processed: {processed_count}", (10, 65), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 0), thickness)
+        cv.putText(frame, f"Detections: {detections_count}", (10, 85), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
+        cv.putText(frame, f"Total Detections: {self.detection_count}", (10, 105), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
+        
+        # Add alert status
+        alert_status = f"Active Alerts: {len(self.active_alerts)}"
+        alert_color = (0, 0, 255) if self.active_alerts else (0, 255, 0)
+        cv.putText(frame, alert_status, (10, 125), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, alert_color, thickness)
+        
+        # Add alert classes if any are active
+        if self.active_alerts:
+            alert_text = "Alerts: " + ", ".join([self.alert_classes[class_id] for class_id in self.active_alerts])
+            cv.putText(frame, alert_text, (10, 145), 
+                      cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (0, 0, 255), 1)
+        
+        cv.putText(frame, f"Time: {timestamp}", (10, 160), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
+        cv.putText(frame, f"Interval: {self.processing_interval}s", (10, 175), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
+        cv.putText(frame, "Press ESC to exit, SPACE to pause", (10, 190), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
+
+    def _resize_frame(self, frame):
+        """Resize frame for display"""
+        return cv.resize(frame, (self.display_width, self.display_height))
+
+    def process_video(self):
+        """
+        Main video processing loop - single-threaded sequential processing
+        """
+        print(f"Starting video file processing: {self.video_path}")
+        
+        # Open video file
+        cap = cv.VideoCapture(self.video_path)
+        if not cap.isOpened():
+            error_msg = f"Could not open video file: {self.video_path}"
+            raise RuntimeError(error_msg)
+        
+        # Get video properties
+        self.frame_width = int(cap.get(cv.CAP_PROP_FRAME_WIDTH))
+        self.frame_height = int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))
+        self.video_fps = cap.get(cv.CAP_PROP_FPS)
+        self.total_frames = int(cap.get(cv.CAP_PROP_FRAME_COUNT))
+        
+        # Calculate display dimensions
+        self.display_height = int((self.display_width / self.frame_width) * self.frame_height)
+        
+        print(f"Video properties: {self.frame_width}x{self.frame_height} at {self.video_fps:.2f} FPS")
+        print(f"Total frames: {self.total_frames}")
+        print(f"Display size: {self.display_width}x{self.display_height}")
+        print(f"Processing interval: {self.processing_interval} seconds")
+        
+        # Calculate frame skip based on processing interval and video FPS
+        frames_to_skip = max(1, int(self.processing_interval * self.video_fps))
+        print(f"Processing every {frames_to_skip} frame(s)")
+        
+        frame_count = 0
+        processed_count = 0
+        paused = False
+        
+        try:
+            while True:
+                if not paused:
+                    ret, frame = cap.read()
+                    if not ret:
+                        print("End of video reached")
+                        break
+                    
+                    frame_count += 1
+                    
+                    # Process frame based on interval
+                    if frame_count % frames_to_skip == 0:
+                        processed_count += 1
+                        
+                        # Run YOLO detection
+                        processed_frame, detections = self._run_yolo_detection(frame, frame_count)
+                        
+                        # Resize for display
+                        display_frame = self._resize_frame(processed_frame)
+                        
+                        # Add informational overlay
+                        self._add_info_overlay(display_frame, frame_count, processed_count, detections)
+                        
+                        # Display the frame
+                        cv.imshow("Video File Processing - YOLO Detection", display_frame)
+                
+                # Handle key presses
+                key = cv.waitKey(1) & 0xFF
+                if key == 27:  # ESC key - exit
+                    break
+                elif key == 32:  # SPACE key - pause/unpause
+                    paused = not paused
+                    print("Video paused" if paused else "Video resumed")
+                elif key == ord('q'):  # Q key - exit
+                    break
+        
+        except Exception as e:
+            print(f"Video processing error: {e}")
+        
+        finally:
+            # Cleanup
+            cap.release()
+            cv.destroyAllWindows()
+            print(f"Video processing completed. Processed {processed_count} frames, Total detections: {self.detection_count}")
+
 def main():
     """
     Demonstration of the SelectiveFrameProcessor with YOLO Object Detection
+    Now includes video file processing option
     """
     print("Selective Frame Processing with YOLO Object Detection")
     print("=" * 60)
     print("Features:")
-    print("- Camera & RTSP support")
-    print("- Multi-threaded architecture") 
+    print("- Camera & RTSP support (dual-threaded)")
+    print("- Video file support (single-threaded)")  
+    print("- Multi-threaded architecture for live sources") 
+    print("- Single-threaded sequential processing for video files")  
     print("- Selective frame sampling for CPU efficiency")
     print("- YOLO object detection integration")
     print("- Class-based alert system")
@@ -543,13 +849,15 @@ def main():
     print("- Real-time performance monitoring")
     print("\nControls:")
     print("  ESC: Exit")
+    print("  SPACE: Pause/Resume (video files only)")
     print("=" * 60)
     
     # Choose source type
     while True:
-        choice = input("Choose source type:\n1. Camera\n2. RTSP Stream\nEnter choice (1 or 2): ").strip()
+        choice = input("Choose source type:\n1. Camera\n2. RTSP Stream\n3. Video File\nEnter choice (1, 2, or 3): ").strip()
         
         if choice == '1':
+            # Your existing camera code...
             camera_index = int(input("Enter camera index (default 0): ") or "0")
             display_width = int(input("Enter display width (default 640): ") or "640")
             processing_interval = float(input("Enter processing interval in seconds (default 0.5): ") or "0.5")
@@ -569,8 +877,19 @@ def main():
                 model_path=model_path,
                 alert_classes_path=alert_classes_path if alert_classes_path else None
             )
+            
+            try:
+                processor.start()
+                while processor.running:
+                    time.sleep(0.1)
+            except KeyboardInterrupt:
+                print("\nInterrupted by user")
+            finally:
+                processor.stop()
             break
+            
         elif choice == '2':
+            # Your existing RTSP code...
             rtsp_url = input("Enter RTSP URL: ").strip()
             if not rtsp_url:
                 rtsp_url = "rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4"
@@ -593,22 +912,51 @@ def main():
                 model_path=model_path,
                 alert_classes_path=alert_classes_path if alert_classes_path else None
             )
-            break
-        else:
-            print("Invalid choice. Please enter 1 or 2.")
-    
-    try:
-        processor.start()
-        
-        # Keep main thread alive while threads run
-        while processor.running:
-            time.sleep(0.1)
             
-    except KeyboardInterrupt:
-        print("\nInterrupted by user")
-    finally:
-        processor.stop()
-
+            try:
+                processor.start()
+                while processor.running:
+                    time.sleep(0.1)
+            except KeyboardInterrupt:
+                print("\nInterrupted by user")
+            finally:
+                processor.stop()
+            break
+            
+        elif choice == '3':
+            # Video file processing
+            video_path = input("Enter video file path: ").strip()
+            if not video_path:
+                print("No video path provided. Using default sample video.")
+                # You might want to provide a default sample video path
+                video_path = "sample_video.mp4"  # Change this to a real sample path
+            
+            display_width = int(input("Enter display width (default 640): ") or "640")
+            processing_interval = float(input("Enter processing interval in seconds (default 0.5): ") or "0.5")
+            model_path = input("Enter YOLO model path (or press Enter for pretrained model): ").strip()
+            alert_classes_path = input("Enter alert classes config file path (or press Enter to skip): ").strip()
+            
+            if not model_path:
+                model_path = "yolo11n.pt"
+                print("Using pretrained YOLO11n model")
+            
+            # Use the new VideoFileProcessor (single-threaded)
+            video_processor = VideoFileProcessor(
+                video_path=video_path,
+                processing_interval=processing_interval,
+                display_width=display_width,
+                model_path=model_path,
+                conf_threshold=0.5,
+                alert_classes_path=alert_classes_path if alert_classes_path else None,
+                log_file="video_detection_log.txt"
+            )
+            
+            # Start single-threaded processing
+            video_processor.process_video()
+            break
+            
+        else:
+            print("Invalid choice. Please enter 1, 2, or 3.")
 
 if __name__ == '__main__':
     main()
