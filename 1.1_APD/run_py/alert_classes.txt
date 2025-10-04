@@ -8,10 +8,10 @@
 # Example for YOLO dataset:
 
 # These classes is for production room
-0:person_with_helmet_forklift:0
-1:person_with_mask_forklift:0
-4:person_without_mask_helmet_forklift:0
-5:person_without_mask_nonForklift:0
+0:person_with_helmet_forklift
+1:person_with_mask_forklift
+4:person_without_mask_helmet_forklift
+5:person_without_mask_nonForklift
 
 # These classes is for detectMe
 #  0: person
