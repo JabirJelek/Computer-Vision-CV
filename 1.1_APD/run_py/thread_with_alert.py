@@ -19,8 +19,8 @@ class SelectiveFrameProcessor:
     """
     
     def __init__(self, source=0, fps=30, processing_interval=0.5, is_rtsp=False, display_width=640, 
-                 model_path="path/to/your/model.pt", 
-                 conf_threshold=0.5, alert_classes_path=None):
+                model_path="path/to/your/model.pt", 
+                conf_threshold=0.5, alert_classes_path=None, log_file="detection_log.txt"):
         """
         Args:
             source: Camera device index (int) or RTSP URL (string)
@@ -37,6 +37,10 @@ class SelectiveFrameProcessor:
         self.processing_interval = processing_interval
         self.display_width = display_width
         self.conf_threshold = conf_threshold
+
+            # Initialize logging system
+        self.log_file = log_file
+        self._initialize_logging()
         
         # Initialize YOLO model
         self.model_path = model_path
@@ -92,6 +96,46 @@ class SelectiveFrameProcessor:
         self.max_capture_failures = 10
         self.detection_count = 0
         
+    def _initialize_logging(self):
+        """Initialize logging system"""
+        try:
+            # Create log header if file doesn't exist
+            if not os.path.exists(self.log_file):
+                with open(self.log_file, 'w') as f:
+                    f.write("Timestamp,Frame_Number,Class_ID,Class_Name,Confidence,Alert_Triggered\n")
+            print(f"Logging enabled: {self.log_file}")
+        except Exception as e:
+            print(f"Log initialization warning: {e}")
+
+    def _log_detection(self, class_id, class_name, confidence, frame_num, is_alert=False):
+        """Log detection event to file"""
+        try:
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            alert_flag = "YES" if is_alert else "NO"
+            
+            log_entry = f"{timestamp},{frame_num},{class_id},{class_name},{confidence:.3f},{alert_flag}\n"
+            
+            with open(self.log_file, 'a') as f:
+                f.write(log_entry)
+                
+        except Exception as e:
+            print(f"Logging error: {e}")  # Silent fail - don't break main functionality
+            
+    def _log_detection(self, class_id, class_name, confidence, frame_num, is_alert=False):
+        """Log detection event to file"""
+        try:
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            alert_flag = "YES" if is_alert else "NO"
+            
+            log_entry = f"{timestamp},{frame_num},{class_id},{class_name},{confidence:.3f},{alert_flag}\n"
+            
+            with open(self.log_file, 'a') as f:
+                f.write(log_entry)
+                
+        except Exception as e:
+            print(f"Logging error: {e}")  # Silent fail - don't break main functionality
+
+        
     def _initialize_alert_classes(self):
         """Initialize alert classes from configuration file"""
         alert_classes = {}
@@ -144,7 +188,7 @@ class SelectiveFrameProcessor:
             print("Falling back to pretrained YOLO11n model")
             return YOLO("yolo11n.pt")  # Ultimate fallback:cite[1]
 
-    def _check_alerts(self, results):
+    def _check_alerts(self, results, frame_num):
         """Check detections against alert classes and trigger alerts if needed"""
         current_time = time.time()
         newly_triggered = set()
@@ -154,30 +198,37 @@ class SelectiveFrameProcessor:
                 class_id = int(box.cls.item())
                 confidence = box.conf.item()
                 
+                # Get class name from model names
+                class_name = "unknown"
+                if hasattr(self.model, 'names') and self.model.names:
+                    class_name = self.model.names.get(class_id, f"class_{class_id}")
+                else:
+                    class_name = f"class_{class_id}"
+                
+                # Log ALL detections (not just alert classes)
+                self._log_detection(class_id, class_name, confidence, frame_num, is_alert=False)
+                
                 # Check if this class is in our alert classes
                 if class_id in self.alert_classes:
                     # Check cooldown for this class
                     last_alert = self.alert_cooldown.get(class_id, 0)
                     if current_time - last_alert >= self.alert_cooldown_duration:
                         # Trigger alert
-                        class_name = self.alert_classes[class_id]
+                        alert_class_name = self.alert_classes[class_id]
                         newly_triggered.add(class_id)
                         self.alert_cooldown[class_id] = current_time
                         
-                        # Print alert message
-                        alert_msg = f"🚨 ALERT: {class_name} detected (Confidence: {confidence:.2f})"
-                        print(alert_msg)
+                        # Log the alert
+                        self._log_detection(class_id, alert_class_name, confidence, frame_num, is_alert=True)
                         
-                        # You can add additional alert actions here:
-                        # - Sound alerts
-                        # - Log to file
-                        # - Send notifications
-                        # - Trigger external systems
-        
-        # Update active alerts
-        self.active_alerts = newly_triggered
-    
-    def _run_yolo_detection(self, frame):
+                        # Print alert message
+                        alert_msg = f"🚨 ALERT: {alert_class_name} detected (Confidence: {confidence:.2f})"
+                        print(alert_msg)
+            
+            # Update active alerts
+            self.active_alerts = newly_triggered  
+
+    def _run_yolo_detection(self, frame, frame_num):
         """Run YOLO object detection on a single frame"""
         try:
             # Run YOLO inference:cite[1]
@@ -188,7 +239,7 @@ class SelectiveFrameProcessor:
             )
             
             # Check for alerts
-            self._check_alerts(results)
+            self._check_alerts(results, frame_num)
             
             # Process results
             if results and len(results) > 0:
@@ -202,7 +253,8 @@ class SelectiveFrameProcessor:
             
         except Exception as e:
             print(f"YOLO inference error: {e}")
-            return frame, 0
+            return frame, 0             
+
 
     def _add_info_overlay(self, frame, frame_num, processed_count, detections_count):
         """Add informational text overlay to the frame with YOLO-specific info"""
@@ -327,7 +379,7 @@ class SelectiveFrameProcessor:
         else:
             print("RTSP reconnection failed")
     
-    def _run_yolo_detection(self, frame):
+    def _run_yolo_detection(self, frame, frame_num):
         """Run YOLO object detection on a single frame"""
         try:
             # Run YOLO inference:cite[1]
@@ -336,6 +388,9 @@ class SelectiveFrameProcessor:
                 conf=self.conf_threshold,
                 verbose=False  # Set to True for detailed inference info
             )
+            
+            # Check for alerts
+            self._check_alerts(results, frame_num)
             
             # Process results
             if results and len(results) > 0:
@@ -350,7 +405,7 @@ class SelectiveFrameProcessor:
         except Exception as e:
             print(f"YOLO inference error: {e}")
             return frame, 0
-        
+                
     def _processing_loop(self):
         """Run YOLO detection on frames at fixed time intervals"""
         print("YOLO processing thread started - sampling frames at fixed intervals")
@@ -373,10 +428,10 @@ class SelectiveFrameProcessor:
                 if frame_to_process is not None:
                     frames_processed += 1
                     
-                    # Run YOLO object detection
-                    processed_frame, detections = self._run_yolo_detection(frame_to_process)
+                    # Run YOLO object detection - pass both frame and frame_num
+                    processed_frame, detections = self._run_yolo_detection(frame_to_process, frame_num)
                     
-                    # Resize frame to smaller display size
+                    # Rest of your existing code remains the same...
                     resized_frame = self._resize_frame(processed_frame)
                     
                     # Add informational overlay with detection info
@@ -393,10 +448,7 @@ class SelectiveFrameProcessor:
                 
                 last_processing_time = current_time
                 
-            time.sleep(0.001)
-                
-        print(f"YOLO processing thread stopped. Total frames processed: {frames_processed}")
-    
+            time.sleep(0.001)          
     def _resize_frame(self, frame):
         """Resize frame to display dimensions maintaining aspect ratio"""
         return cv.resize(frame, (self.display_width, self.display_height))
@@ -486,6 +538,8 @@ def main():
     print("- YOLO object detection integration")
     print("- Class-based alert system")
     print("- Resizable display output")
+    print("- Alert class with file input")
+    print("- Logging for alerted classes")        
     print("- Real-time performance monitoring")
     print("\nControls:")
     print("  ESC: Exit")
