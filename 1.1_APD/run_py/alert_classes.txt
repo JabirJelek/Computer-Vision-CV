@@ -1,12 +1,17 @@
-# Alert Classes Configuration
-# Format: class_id: class_name
+# alert_classes.config - New format with cooldown times
+# Format: Class_ID:Class_Name:cooldown_time
+#0:person:5      # Class 0 (person) - 5 second cooldown
+#2:car:3         # Class 2 (car) - 3 second cooldown  
+#3:bicycle:10    # Class 3 (bicycle) - 10 second cooldown
+
+
 # Example for YOLO dataset:
 
 # These classes is for production room
-#0: person_with_helmet_forklift
-#1: person_with_mask_forklift
-#4: person_without_mask_helmet_forklift
-#5: person_without_mask_nonForklift
+0:person_with_helmet_forklift:0
+1:person_with_mask_forklift:0
+4:person_without_mask_helmet_forklift:0
+5:person_without_mask_nonForklift:0
 
 # These classes is for detectMe
-  0: person
+#  0: person
