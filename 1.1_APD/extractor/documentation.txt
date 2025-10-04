@@ -1,0 +1,65 @@
+"""
+CAMERAFRAMEEXTRACTOR.PY
+
+1. PURPOSE:
+Captures frames from a webcam at regular intervals and saves them as timestamped image files.
+
+2. STRUCTURE:
+Imports: cv2 (OpenCV), os, time, datetime, pathlib.Path
+Classes: VideoFrameExtractor (main class for frame capture functionality)
+Functions: __init__, start_capture, set_interval, main (CLI entry point)
+Constants: Default values for output_dir, capture_interval, resolution, prefix, format
+
+3. USAGE:
+Command line: python cameraFrameExtractor.py -i 0.5 -d 60 -o my_frames
+Python: 
+    extractor = VideoFrameExtractor(capture_interval=1.0, resolution=(1920, 1080))
+    extractor.start_capture(duration=30)
+
+4. NOTES:
+Strengths: 
+- Flexible timing intervals and capture duration
+- Real-time preview with OpenCV window
+- Timestamped filenames prevent overwrites
+- Command-line interface for easy scripting
+- Automatic directory creation
+
+Limitations:
+- Capture interval may not be exact due to processing delays
+- Requires OpenCV and camera access
+- No error handling for camera disconnections during capture
+- JPEG compression quality is fixed at 95
+"""
+
+"""
+VIDEOFRAMEEXTRACTOR.PY
+
+1. PURPOSE:
+Extracts frames from video files at specified intervals using FFmpeg command-line tool.
+
+2. STRUCTURE:
+Imports: os, subprocess, argparse, pathlib.Path, datetime
+Classes: None (functional approach)
+Functions: extract_frames (main extraction logic), main (CLI interface)
+Constants: Default values for fps, format, quality, prefix
+
+3. USAGE:
+Command line: python videoFrameExtractor.py input.mp4 -f 2 -o my_frames -fmt png
+Python: 
+    extract_frames("video.mp4", "output_frames", fps=1, format="jpg", quality=2)
+
+4. NOTES:
+Strengths: 
+- Leverages FFmpeg for reliable, fast frame extraction
+- Timestamped batch processing prevents filename conflicts
+- Real-time progress display via FFmpeg stats
+- Automatic output directory naming based on input file
+- Quality control for JPEG compression
+
+Limitations:
+- Requires FFmpeg installed and in system PATH
+- No frame-by-frame control or filtering
+- Batch processing only (no real-time extraction)
+- Limited error handling for corrupt video files
+- Quality parameter only affects JPEG format
+"""

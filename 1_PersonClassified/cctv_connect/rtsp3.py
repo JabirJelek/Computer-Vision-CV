@@ -1,8 +1,8 @@
 import cv2
 import time
 
-# Construct RTSP URL "rtsp://admin:Admin888@192.168.0.8:554/Streaming/Channels/101" f"rtsp://{USERNAME}:{PASSWORD}@{DVR_IP}:554/Streaming/Channels/{CHANNEL}0{STREAM_TYPE+1}"
-rtsp_url = "rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/501"
+# Construct RTSP URL f"rtsp://{USERNAME}:{PASSWORD}@{DVR_IP}:554/Streaming/Channels/{CHANNEL}0{STREAM_TYPE+1}"
+rtsp_url = "rtsp://{USERNAME}:{PASSWORD}@{DVR_IP}:554/ch0{CHANNEL}.264"
 
 # Alternative formats to try if above doesn't work:
 # rtsp_url = f"rtsp://{USERNAME}:{PASSWORD}@{DVR_IP}:554/cam/realmonitor?channel={CHANNEL}&subtype={STREAM_TYPE}"

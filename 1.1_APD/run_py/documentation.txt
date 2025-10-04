@@ -1,0 +1,85 @@
+alert_classes.txt
+
+File di atas digunakan secara spesifik pada folder 1.1_APD\. Beberapa file yang dapat digunakan,
+secara khusus memiliki nama thread_ atau thraeding_.
+
+
+
+"""
+C_THREADING.PY
+
+1. PURPOSE:
+Dual-thread object detection system with YOLO integration for real-time camera and RTSP stream processing with configurable frame sampling.
+
+2. STRUCTURE:
+Imports: cv2, threading, time, pathlib, ultralytics.YOLO, numpy
+Classes: SelectiveFrameProcessor (dual-thread YOLO processor)
+Functions: main() - interactive source selection, _run_yolo_detection() - YOLO inference
+Constants: Configuration parameters for processing intervals, display sizes, confidence thresholds
+
+3. USAGE:
+Run script and choose between camera or RTSP stream for YOLO object detection with configurable processing intervals and confidence thresholds.
+
+4. NOTES:
+Strengths: Efficient frame sampling reduces CPU load, robust YOLO integration, RTSP reconnection logic, dynamic parameter adjustment
+Limitations: No alert system included, basic YOLO detection only, hard-coded fallback to YOLO11n model
+"""
+
+"""
+DISPLAYMODEL.PY
+
+1. PURPOSE:
+Video processing system for YOLO object detection with configurable class-specific display settings and safety violation alerts.
+
+2. STRUCTURE:
+Imports: cv2, ultralytics.YOLO, numpy
+Classes: None
+Functions: predict_and_detect_advanced() - configurable YOLO detection with custom display
+Constants: CLASS_CONFIG - comprehensive class configuration dictionary
+
+3. USAGE:
+Run script to process video with safety violation detection - displays custom alerts for different protection scenarios and saves output video.
+
+4. NOTES:
+Strengths: Highly configurable class display settings, safety violation alert system, video output generation
+Limitations: Hard-coded file paths, specific to safety equipment detection, no real-time camera support
+"""
+
+"""
+MODEL.PY
+
+1. PURPOSE:
+Basic YOLO object detection system for video processing with automatic color generation and bounding box visualization.
+
+2. STRUCTURE:
+Imports: cv2, ultralytics.YOLO
+Functions: get_color() - deterministic color generator, predict_and_detect() - YOLO inference with visualization
+Constants: Hard-coded model and video file paths
+
+3. USAGE:
+Run script to process video with YOLO detection - displays real-time inference results and saves output video with bounding boxes.
+
+4. NOTES:
+Strengths: Simple and clean implementation, automatic color generation for classes, video output generation
+Limitations: Hard-coded file paths, basic visualization only, no configurable class settings or alert system
+"""
+
+"""
+MODULAR_EXP.PY
+
+1. PURPOSE:
+Comprehensive modular object detection system with dual-thread live processing and single-thread video file analysis using YOLO with advanced alert features.
+
+2. STRUCTURE:
+Imports: cv2, threading, time, pathlib, ultralytics.YOLO, numpy
+Classes: SelectiveFrameProcessor (live camera/RTSP), VideoFileProcessor (file processing)
+Functions: main() - interactive multi-source selection, various internal methods for detection and alerting
+Constants: Configuration parameters for processing intervals, display sizes, per-class cooldowns
+
+3. USAGE:
+Run script and choose between camera, RTSP stream, or video file processing with configurable per-class alert cooldowns and comprehensive logging.
+
+4. NOTES:
+Strengths: Per-class cooldown configuration, modular architecture separates live and file processing, robust alert system with individual timing
+Limitations: Complex threading model, duplicate method definitions between classes, hard-coded fallback models
+"""

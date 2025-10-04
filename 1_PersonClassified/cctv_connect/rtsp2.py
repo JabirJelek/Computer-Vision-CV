@@ -1,7 +1,7 @@
 # capture using rtsp protocol
 import cv2
 
-rtsp_url = "rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/101"
+rtsp_url = "rtsp://{USERNAME}:{PASSWORD}@{DVR_IP}:554/ch0{CHANNEL}.264"
 
 cap = cv2.VideoCapture(rtsp_url)
 

@@ -1,0 +1,2 @@
+Pada setiap folder sudah ada sebuah documentation yang berfungsi sebagai penanda / 
+checkpoint mengenai cara menggunakan file yang dimaksud.

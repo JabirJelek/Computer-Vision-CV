@@ -1,0 +1,20 @@
+
+"""
+DEPLOYTOCCTV-HISTORY.PY
+
+1. PURPOSE:
+RTSP stream object detection system using YOLO model with real-time counting, cumulative statistics, and automatic reconnection.
+
+2. STRUCTURE:
+Imports: cv2, ultralytics.YOLO, pathlib, collections.Counter, time
+Classes: RTSPDetector (complete RTSP detection pipeline)
+Functions: main() - configuration and execution
+Constants: MODEL_PATH, RTSP_URL, CONF_THRESHOLD configuration
+
+3. USAGE:
+Run script to connect to RTSP stream, perform real-time object detection with YOLO, and display cumulative counts with automatic reconnection.
+
+4. NOTES:
+Strengths: Robust reconnection logic, real-time and cumulative counting, optimized RTSP settings, comprehensive error handling
+Limitations: Hard-coded model path, incomplete RTSP URL requiring parameters, specific to ONNX model format
+"""

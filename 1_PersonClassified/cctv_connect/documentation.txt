@@ -1,0 +1,58 @@
+"""
+CCTVDETECT.PY
+
+1. PURPOSE:
+RTSP stream capture and recording system for DVR/CCTV cameras with automatic reconnection and timestamped video output.
+
+2. STRUCTURE:
+Imports: cv2, time, datetime
+Classes: None
+Functions: None (procedural script)
+Constants: DVR_IP, USERNAME, PASSWORD, CHANNEL, STREAM_TYPE configuration
+
+3. USAGE:
+Run script to connect to DVR RTSP stream, display live feed, and record timestamped video files - press 'q' to stop.
+
+4. NOTES:
+Strengths: Automatic reconnection on stream failure, timestamped output files, buffer optimization for reduced delay
+Limitations: Hard-coded DVR credentials, basic stream handling, no object detection or alert system
+"""
+
+"""
+RTSP2.PY
+
+1. PURPOSE:
+Basic RTSP stream capture and display system for viewing live camera feeds from DVR/CCTV devices.
+
+2. STRUCTURE:
+Imports: cv2
+Classes: None
+Functions: None (minimal procedural script)
+Constants: rtsp_url template string (requires parameter substitution)
+
+3. USAGE:
+Run script to display live RTSP stream - requires filling in username, password, DVR IP, and channel parameters in URL.
+
+4. NOTES:
+Strengths: Extremely simple implementation, minimal dependencies
+Limitations: Incomplete URL (requires parameter substitution), no error recovery, basic functionality only
+"""
+"""
+RTSP3.PY
+
+1. PURPOSE:
+RTSP stream capture and display system with automatic reconnection and performance optimization for DVR/CCTV feeds.
+
+2. STRUCTURE:
+Imports: cv2, time
+Classes: None
+Functions: None (procedural script with reconnection logic)
+Constants: rtsp_url template string (requires parameter substitution)
+
+3. USAGE:
+Run script to display live RTSP stream with automatic reconnection on failures - requires filling URL parameters.
+
+4. NOTES:
+Strengths: Automatic reconnection logic, buffer optimization for reduced latency, performance tuning
+Limitations: Incomplete URL (requires parameter substitution), no recording functionality, basic error handling
+"""

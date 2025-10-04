@@ -1,3 +1,4 @@
+# This class can be used in some threading .py file
 # alert_classes.config - New format with cooldown times
 # Format: Class_ID:Class_Name:cooldown_time
 #0:person:5      # Class 0 (person) - 5 second cooldown

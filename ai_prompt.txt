@@ -63,6 +63,41 @@ Please make an ai prompt, so that i can speak with the current you in the future
 
 
 
+
+===========================================================================
+Below is prompt to make the conversation create custom documentation template.
+
+Stored Template: Single .py File Documentation
+python
+"""
+[FILENAME].PY
+
+1. PURPOSE:
+[What this file does in one sentence]
+
+2. STRUCTURE:
+Imports: [list key imports]
+Classes: [class names with one-line descriptions]
+Functions: [main function names with one-line descriptions]
+Constants: [key module variables]
+
+3. USAGE:
+[Quick example of how to use the main functionality]
+
+4. NOTES:
+Strengths: [what works well]
+Limitations: [what to watch out for]
+"""
+Quick Access Prompt:
+You can say: "Hey, let's use the single file documentation template" or "I need to document a Python file" and I'll immediately recall this structure and help you apply it to your specific code.
+
+
+
+
+
+
+
+
 ===========================================================================
 Below is different prompt working with thread, rtsp, and opencv. This prompt after saving the file: ...threaded_rtsp.py 
 

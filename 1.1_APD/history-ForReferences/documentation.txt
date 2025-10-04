@@ -1,0 +1,146 @@
+"""
+GET_FRESH_FRAME.PY
+
+1. PURPOSE:
+Thread-based video capture system that provides always-updated frames by continuously reading from camera in background.
+
+2. STRUCTURE:
+Imports: threading, time, numpy, cv2
+Classes: FreshestFrame (threading.Thread) - main frame buffer class
+Functions: main() - demonstration with RTSP stream
+Constants: None (configuration in main function)
+
+3. USAGE:
+Initialize with VideoCapture object, use read() to get latest frame. Demonstrates real-time RTSP stream processing with callback.
+
+4. NOTES:
+Strengths: Eliminates frame lag by running capture in separate thread, provides frame sequencing, supports waiting for specific frame numbers
+Limitations: Requires proper resource cleanup, RTSP demo uses hard-coded credentials, may need adjustment for different camera sources
+"""
+
+"""
+STABLE_ALERT_VIDEO.PY
+
+1. PURPOSE:
+Dual-mode object detection system with real-time camera/RTSP processing and video file analysis using YOLO model with alert system.
+
+2. STRUCTURE:
+Imports: cv2, threading, time, pathlib, ultralytics.YOLO, numpy
+Classes: SelectiveFrameProcessor (dual-thread live processing), VideoFileProcessor (single-thread file processing)
+Functions: main() - interactive source selection, various internal methods for detection, alerting, and logging
+Constants: Configuration parameters for processing intervals, display sizes, confidence thresholds
+
+3. USAGE:
+Run script and choose between camera, RTSP stream, or video file processing with configurable detection intervals and alert classes.
+
+4. NOTES:
+Strengths: Dual-thread architecture prevents frame lag, comprehensive alert system with cooldowns, detailed logging, supports multiple input sources
+Limitations: Complex threading model, hard-coded fallback to YOLO11n, RTSP reconnection logic may need tuning
+"""
+
+
+"""
+STABLE_VIDEO.PY
+
+1. PURPOSE:
+Modular object detection system with dual-thread live processing and single-thread video file analysis using YOLO model.
+
+2. STRUCTURE:
+Imports: cv2, threading, time, pathlib, ultralytics.YOLO, numpy
+Classes: SelectiveFrameProcessor (live camera/RTSP), VideoFileProcessor (file processing)
+Functions: main() - interactive source selection, various internal methods for detection and alerting
+Constants: Configuration parameters for processing intervals, display sizes, confidence thresholds
+
+3. USAGE:
+Run script and choose between camera, RTSP stream, or video file processing with configurable detection intervals and per-class alert cooldowns.
+
+4. NOTES:
+Strengths: Per-class cooldown configuration, modular architecture separates live and file processing, comprehensive alert tracking
+Limitations: Complex threading model for live processing, duplicate method definitions in classes, hard-coded fallback models
+"""
+
+"""
+THREAD_COMPREHENSIVE.PY
+
+1. PURPOSE:
+Dual-thread video capture system that continuously grabs frames in one thread and processes them at fixed intervals in another.
+
+2. STRUCTURE:
+Imports: cv2, threading, time, numpy
+Classes: SelectiveFrameProcessor (dual-thread video processor)
+Functions: main() - interactive source selection
+Constants: Configuration parameters for processing intervals and display sizes
+
+3. USAGE:
+Run script and choose between camera or RTSP stream for efficient frame capture with configurable processing intervals.
+
+4. NOTES:
+Strengths: Eliminates frame lag by separating capture and processing, RTSP reconnection logic, dynamic parameter adjustment
+Limitations: No object detection functionality, basic display-only processing, simplified error handling
+"""
+
+
+"""
+THREAD_WITH_ALERT.PY
+
+1. PURPOSE:
+Dual-thread object detection system with YOLO integration, alert triggering, and comprehensive logging for real-time video processing.
+
+2. STRUCTURE:
+Imports: cv2, threading, time, pathlib, ultralytics.YOLO, numpy
+Classes: SelectiveFrameProcessor (dual-thread processor with YOLO detection)
+Functions: main() - interactive source selection, various internal methods for detection and alerting
+Constants: Configuration parameters for processing intervals, confidence thresholds, alert cooldowns
+
+3. USAGE:
+Run script and choose between camera or RTSP stream for real-time object detection with configurable alert classes and processing intervals.
+
+4. NOTES:
+Strengths: Comprehensive alert system with cooldowns, detailed logging of all detections, RTSP reconnection logic, dynamic parameter adjustment
+Limitations: Duplicate method definitions, complex threading model, hard-coded fallback to YOLO11n model
+
+"""
+
+
+
+"""
+THREADED_FRAME.PY
+
+1. PURPOSE:
+Dual-thread video processing system that continuously captures frames in one thread and processes them at configurable intervals in another.
+
+2. STRUCTURE:
+Imports: cv2, threading, time, numpy
+Classes: SelectiveFrameProcessor (dual-thread frame processor)
+Functions: main() - demonstration, _process_frame() - example processing logic
+Constants: Configuration parameters for camera index, FPS, and processing intervals
+
+3. USAGE:
+Run script to start camera processing with configurable intervals - press ESC to exit. Demonstrates efficient frame sampling.
+
+4. NOTES:
+Strengths: Simple dual-thread architecture, configurable processing intervals, automatic frame dropping to reduce CPU load
+Limitations: Basic camera-only support (no RTSP), minimal processing example, no error recovery for camera failures
+"""
+
+
+
+"""
+THREADED_RTSP.PY
+
+1. PURPOSE:
+Dual-thread video processing system supporting both camera devices and RTSP streams with configurable frame sampling intervals.
+
+2. STRUCTURE:
+Imports: cv2, threading, time, numpy
+Classes: SelectiveFrameProcessor (dual-thread processor for camera/RTSP)
+Functions: main() - interactive source selection, _process_frame() - example processing logic
+Constants: Configuration parameters for source types, FPS, and processing intervals
+
+3. USAGE:
+Run script and choose between camera or RTSP stream - supports public demo streams and custom RTSP URLs with reconnection logic.
+
+4. NOTES:
+Strengths: Robust RTSP support with reconnection, daemon threads for clean shutdown, configurable processing intervals
+Limitations: Basic processing example only, no object detection, minimal error handling for camera failures
+"""

@@ -1,0 +1,60 @@
+"""
+C_THREADING.PY
+
+1. PURPOSE:
+Dual-thread object detection system with YOLO integration for real-time camera and RTSP stream processing with configurable frame sampling.
+
+2. STRUCTURE:
+Imports: cv2, threading, time, pathlib, ultralytics.YOLO, numpy
+Classes: SelectiveFrameProcessor (dual-thread YOLO processor)
+Functions: main() - interactive source selection, _run_yolo_detection() - YOLO inference
+Constants: Configuration parameters for processing intervals, display sizes, confidence thresholds
+
+3. USAGE:
+Run script and choose between camera or RTSP stream for YOLO object detection with configurable processing intervals and confidence thresholds.
+
+4. NOTES:
+Strengths: Efficient frame sampling reduces CPU load, robust YOLO integration, RTSP reconnection logic, dynamic parameter adjustment
+Limitations: No alert system included, basic YOLO detection only, hard-coded fallback to YOLO11n model
+"""
+
+
+"""
+DMC-CCTV.PY
+
+1. PURPOSE:
+Advanced modular CCTV object detection system with YOLO integration, class-specific audio alerts, conditional bounding boxes, and comprehensive performance monitoring.
+
+2. STRUCTURE:
+Imports: cv2, ultralytics.YOLO, pygame, threading, time, collections, dataclasses, numpy, logging
+Classes: AppConfig (configuration), AlertManager, TimeWindowCounter, DetectionVisualizer, AudioManager, FPSCounter, ObjectDetector
+Functions: main() - application initialization and execution
+Constants: Comprehensive configuration with audio mappings, class settings, and performance parameters
+
+3. USAGE:
+Run script for real-time CCTV object detection with configurable frame skipping, audio alerts, conditional visualization, and detailed performance monitoring.
+
+4. NOTES:
+Strengths: Highly modular architecture, class-specific audio alerts, conditional bounding box logic, frame skipping for performance, comprehensive logging
+Limitations: Complex configuration, hard-coded file paths, requires specific audio files, resource-intensive feature set
+"""
+
+"""
+PTCAMERA-COMPLEX.PY
+
+1. PURPOSE:
+Comprehensive real-time object detection system with YOLO integration, audio alerts, time-windowed counting, and robust video source handling.
+
+2. STRUCTURE:
+Imports: cv2, ultralytics.YOLO, pygame, threading, time, collections, dataclasses
+Classes: AppConfig (configuration), AlertManager, TimeWindowCounter, DetectionVisualizer, ObjectDetector
+Functions: main() - application initialization and execution
+Constants: Comprehensive configuration for model paths, audio alerts, class settings, and video sources
+
+3. USAGE:
+Run script for real-time object detection with configurable camera/RTSP sources - includes audio alerts, time-based counting, and automatic reconnection.
+
+4. NOTES:
+Strengths: Modular architecture with clear separation of concerns, robust reconnection logic, time-windowed counting system, flexible video source support
+Limitations: Complex configuration, hard-coded file paths, requires specific audio files, no frame skipping for performance optimization
+"""

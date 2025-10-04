@@ -1,0 +1,170 @@
+"""
+DEPRECATED_THREAD_VIDEO.PY
+
+1. PURPOSE:
+Multi-threaded video processing with selective frame sampling and YOLO object detection for efficient CPU utilization.
+
+2. STRUCTURE:
+Imports: __future__ (Python 2/3 compat), os, sys, time, threading, numpy, cv2, pathlib, ultralytics.YOLO
+Classes: SelectiveFrameProcessor (main class with dual-thread architecture)
+Functions: __init__, start, stop, _capture_loop, _processing_loop, _run_yolo_detection, _resize_frame, _add_info_overlay, main
+Constants: Default processing parameters and source type mappings
+
+3. USAGE:
+Command line: Run directly for interactive source selection (camera/RTSP/video file)
+Python: 
+    processor = SelectiveFrameProcessor(source=0, processing_interval=0.5)
+    processor.start()
+    # Runs until ESC pressed
+
+4. NOTES:
+Strengths: 
+- Dual-thread architecture prevents frame drops during YOLO processing
+- Selective frame sampling reduces CPU load significantly
+- Supports multiple source types with automatic detection
+- Background model loading for faster video startup
+- Comprehensive performance monitoring and overlay display
+
+Limitations:
+- DEPRECATED - may not be maintained or compatible with latest libraries
+- Python 2/3 compatibility imports suggest older codebase
+- No frame saving or export functionality
+- Limited to CPU inference (no GPU optimization)
+- Complex threading may be difficult to debug
+"""
+
+"""
+PTCAMCOUNTER.PY
+
+1. PURPOSE:
+Real-time object detection and counting using YOLO model with webcam feed, displaying both per-frame and cumulative counts.
+
+2. STRUCTURE:
+Imports: cv2, ultralytics.YOLO, pathlib.Path, collections.Counter
+Classes: None (procedural approach)
+Functions: Main loop with detection, counting, and display logic
+Constants: model_path, CONF_THRESHOLD, class_color_map, camera settings
+
+3. USAGE:
+Run directly: python ptCamCounter.py
+- Uses webcam (index 0) for real-time detection
+- Press 'q' to quit
+- Displays bounding boxes with class names and confidence scores
+- Shows real-time and cumulative object counts
+
+4. NOTES:
+Strengths: 
+- Real-time counting with cumulative tracking
+- Custom model support with TorchScript compatibility
+- Clean count display with semi-transparent overlay
+- Configurable confidence threshold and class colors
+- Efficient single-pass processing
+
+Limitations:
+- Hard-coded model path (not portable)
+- Limited to webcam input only
+- No frame rate optimization or threading
+- Fixed color mapping requires manual class updates
+- No export or logging of count data
+"""
+
+"""
+PTCAMERA-COMPLEX-COPY.PY
+
+1. PURPOSE:
+Advanced real-time object detection with audio alerts, time-windowed counting, and robust video source management (webcam/RTSP).
+
+2. STRUCTURE:
+Imports: cv2, ultralytics.YOLO, pathlib, pygame, threading, time, collections, dataclasses, typing
+Classes: 
+  - AppConfig: Centralized configuration management
+  - AlertManager: Audio alerts with class-specific cooldowns
+  - TimeWindowCounter: Rolling time window for object counting
+  - DetectionVisualizer: Comprehensive frame annotation and display
+  - ObjectDetector: Main detection workflow with reconnection logic
+Functions: main (application entry point), setup_video_source, process_frame, run
+
+3. USAGE:
+Command line: Run directly for automatic camera detection
+Python: 
+    config = AppConfig(camera_source=0, confidence_threshold=0.5)
+    detector = ObjectDetector(config)
+    detector.run()
+
+4. NOTES:
+Strengths:
+- Robust video source handling with automatic reconnection
+- Time-windowed counting (last X seconds) vs simple cumulative
+- Audio alerts with configurable cooldowns per class
+- Comprehensive visualization with multiple info panels
+- Modular architecture with clear separation of concerns
+
+Limitations:
+- Complex codebase with multiple interdependent classes
+- Audio dependencies (pygame) may not be available everywhere
+- No model training or export functionality
+- Memory intensive with time-window history storage
+- Requires careful configuration tuning
+"""
+
+"""
+PTCAMERA.PY
+
+1. PURPOSE:
+Real-time object detection with audio alerts and object counting using YOLO model and webcam feed.
+
+2. STRUCTURE:
+Imports: cv2, ultralytics.YOLO, pathlib.Path, pygame, threading, time, collections.Counter
+Classes: None (procedural approach)
+Functions: play_audio_alert, should_trigger_alert
+Constants: model_path, class_color_map, CONF_THRESHOLD, ALERT_COOLDOWN, class_cooldowns
+
+3. USAGE:
+Run directly: python ptCamera.py
+- Uses webcam (index 0) for real-time detection
+- Plays audio alerts when specified objects are detected
+- Displays real-time and cumulative object counts
+- Shows alert cooldown timers on screen
+- Press 'q' to quit
+
+4. NOTES:
+Strengths:
+- Audio alerts with class-specific cooldowns
+- Simple and straightforward implementation
+- Real-time cooldown status display
+- Non-blocking audio using threading
+- Clean count display with semi-transparent overlay
+
+Limitations:
+- Hard-coded paths (model and audio)
+- Webcam-only input (no RTSP/file support)
+- No error handling for camera disconnections
+- Basic cooldown logic without advanced features
+- Single-threaded processing may drop frames under load
+"""
+
+"""
+TFLITECAMERA.PY
+
+1. PURPOSE:
+Real-time object detection using TensorFlow Lite YOLOv8 model with webcam feed, audio alerts, and counting system.
+
+2. STRUCTURE:
+Imports: cv2, ultralytics.YOLO, pygame, threading, time, collections.Counter, tensorflow
+Classes: None
+Functions: play_audio_alert(), should_trigger_alert()
+Constants: CONF_THRESHOLD, ALERT_COOLDOWN, class_color_map, class_cooldowns
+
+3. USAGE:
+Run the script to start webcam object detection - press 'q' to quit. The system will:
+- Display real-time detection with bounding boxes and labels
+- Show frame-by-frame and cumulative object counts
+- Play audio alerts when specific classes are detected (with cooldown periods)
+- Display cooldown timers for each class
+
+4. NOTES:
+Strengths: Real-time performance with TFLite, threaded non-blocking audio alerts, configurable per-class cooldowns, comprehensive visual feedback with counts panel
+Limitations: Hard-coded file paths, specific to 3 object classes (0,1,2), requires pygame audio file, no error handling for missing model files
+"""
+
+
