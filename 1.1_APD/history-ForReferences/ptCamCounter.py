@@ -4,7 +4,7 @@ from pathlib import Path
 from collections import Counter
 
 # Load your custom trained model
-model_path = Path(r"C:\Farid\Dokumen\Object Detection\CV_model\task1.torchscript")
+model_path = Path(r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\bestSmallS.torchscript")
 model = YOLO(str(model_path), task='detect')
 
 # Initialize webcam
