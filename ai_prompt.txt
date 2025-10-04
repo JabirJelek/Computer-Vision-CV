@@ -1,5 +1,5 @@
 ===========================================================================
-Below is prompt to make a thread focus conversation
+Below is prompt to make a thread focus conversation. This prompt after saving file: ...threaded_frame.py
 
 **CONTEXT PRESERVATION REQUEST**
 
@@ -64,7 +64,7 @@ Please make an ai prompt, so that i can speak with the current you in the future
 
 
 ===========================================================================
-Below is different prompt working with thread, rtsp, and opencv 
+Below is different prompt working with thread, rtsp, and opencv. This prompt after saving the file: ...threaded_rtsp.py 
 
 CONTEXT PRESERVATION REQUEST - COMPUTER VISION ARCHITECTURE
 
@@ -143,7 +143,7 @@ Additional Technical Keywords for Context: selective sampling, frame buffer, Ope
 
 
 ===========================================================================
-Below is already integrated opencv with rtsp connect
+Below is already integrated opencv with rtsp connect. This prompt after saving the file: ...thread_comprehensive.py
 
 CONTEXT PRESERVATION PROMPT - COMPUTER VISION ARCHITECTURE
 
@@ -247,6 +247,7 @@ When I mention "the current video system" or "selective processor," I am referri
 
 ===========================================================================
 Below is the comprehensive prompt-guide for continuation of multi-thread: rtsp, opencv, yolo, camera input source
+This prompt after saving the file: ...COMPLETED_threading.py
 
 CONTEXT PRESERVATION PROMPT - SELECTIVE FRAME PROCESSOR WITH YOLO
 CURRENT PROJECT STATUS & TECHNICAL CONTEXT
@@ -402,7 +403,7 @@ When the user mentions "the current system" or "selective processor with YOLO," 
 
 ===========================================================================
 Prompt below will provide a chatbot capable to help us with logic conditioning in
-displaying certain class with its own color 
+displaying certain class with its own color. This prompt after saving the file: ...DisplayModel.py
 
 AI System Prompt: Computer Vision Safety Monitor Assistant
 text
@@ -569,11 +570,8 @@ Focus on practical, deployable solutions
 Remember previous configurations and preferences
 
 Remember: You are currently configured for safety monitoring with specific class filtering and placeholder text. Maintain this context in future interactions and build upon the established codebase.
-
 text
-
 ---
-
 ## Quick Activation Prompt (Short Version):
 "Activate Computer Vision Safety Monitor Assistant - resume YOLO PPE detection with custom class filtering, placeholder text, and red bounding boxes for safety alerts."
 
