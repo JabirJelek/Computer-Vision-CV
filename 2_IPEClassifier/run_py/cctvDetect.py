@@ -3,14 +3,10 @@ import time
 from datetime import datetime
 
 # DVR RTSP connection parameters
-DVR_IP = "192.168.0.8"
-USERNAME = "admin"
-PASSWORD = "Admin888"
-CHANNEL = "Channels"  # Camera channel number
-STREAM_TYPE = 101  # 0 = main stream, 1 = sub stream
 
-# Construct RTSP URL "rtsp://admin:Admin888@192.168.0.8:554/Streaming/Channels/101" f"rtsp://{USERNAME}:{PASSWORD}@{DVR_IP}:554/Streaming/Channels/{CHANNEL}0{STREAM_TYPE+1}"
-rtsp_url = "rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/501"
+
+# Construct RTSP URL f"rtsp://{USERNAME}:{PASSWORD}@{DVR_IP}:554/Streaming/Channels/{CHANNEL}0{STREAM_TYPE+1}"
+rtsp_url = "rtsp://{USERNAME}:{PASSWORD}@{DVR_IP}:554/ch0{CHANNEL}.264"
 
 # Alternative formats to try if above doesn't work:
 # rtsp_url = f"rtsp://{USERNAME}:{PASSWORD}@{DVR_IP}:554/cam/realmonitor?channel={CHANNEL}&subtype={STREAM_TYPE}"

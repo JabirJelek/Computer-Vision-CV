@@ -517,7 +517,7 @@ def main():
     camera_source = 1
     
     # For RTSP stream (uncomment and modify as needed)
-    #camera_source = "rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/501"
+    #camera_source = "rtsp://{USERNAME}:{PASSWORD}@{DVR_IP}:554/ch0{CHANNEL}.264"
     
     # Try different camera indices if 0 doesn't work
     for camera_idx in [1, 2]:
