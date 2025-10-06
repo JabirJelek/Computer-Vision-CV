@@ -1,4 +1,19 @@
 # Python 2/3 compatibility
+
+
+
+"""
+This file deprecated because it consist of too many lines of code, while 
+the same functionality can be achieved by using threading in a more simpler way.
+
+Therefore, this only used if references needed further.
+
+
+"""
+
+
+
+
 from __future__ import print_function
 
 import os

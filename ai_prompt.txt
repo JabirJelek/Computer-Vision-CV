@@ -1,5 +1,5 @@
 ===========================================================================
-Below is prompt to make a thread focus conversation. This prompt after saving file: ...threaded_frame.py
+Below is prompt to make a thread focus conversation. This prompt after saving file: ...threaded_1.py
 
 **CONTEXT PRESERVATION REQUEST**
 
@@ -168,7 +168,7 @@ You can say: "Hey, let's use the single file documentation template" or "I need 
 
 
 ===========================================================================
-Below is different prompt working with thread, rtsp, and opencv. This prompt after saving the file: ...threaded_rtsp.py 
+Below is different prompt working with thread, rtsp, and opencv. This prompt after saving the file: ...threaded_2.py 
 
 CONTEXT PRESERVATION REQUEST - COMPUTER VISION ARCHITECTURE
 
@@ -247,7 +247,7 @@ Additional Technical Keywords for Context: selective sampling, frame buffer, Ope
 
 
 ===========================================================================
-Below is already integrated opencv with rtsp connect. This prompt after saving the file: ...thread_comprehensive.py
+Below is already integrated opencv with rtsp connect. This prompt after saving the file: ...thread_3.py
 
 CONTEXT PRESERVATION PROMPT - COMPUTER VISION ARCHITECTURE
 
@@ -351,7 +351,7 @@ When I mention "the current video system" or "selective processor," I am referri
 
 ===========================================================================
 Below is the comprehensive prompt-guide for continuation of multi-thread: rtsp, opencv, yolo, camera input source
-This prompt after saving the file: ...STABLE_threading.py
+This prompt after saving the file: ...STABLE_thread_1.py
 
 CONTEXT PRESERVATION PROMPT - SELECTIVE FRAME PROCESSOR WITH YOLO
 CURRENT PROJECT STATUS & TECHNICAL CONTEXT
@@ -700,7 +700,7 @@ This prompt will help ensure I maintain consistent expertise and context for you
 
 
 ===========================================================================
-Below is the prompt after i finished with file: thread_with_alert.py
+Below is the prompt after i finished with file: thread_4.py
 
 
 CONTEXT PRESERVATION PROMPT - SELECTIVE FRAME PROCESSOR WITH YOLO & ALERT SYSTEM
@@ -852,7 +852,7 @@ When the user mentions "the current system" or "selective processor with YOLO," 
 
 
 ===========================================================================
-Below is the prompt after i moved STABLE_modular.py into history-ForReferences
+Below is the prompt after i moved DEPRECATED_exp.py into history-ForReferences
 
 🤖 AI Context Preservation Prompt - Selective Frame Processor with YOLO & Alert System
 PROJECT CONTEXT & TECHNICAL MEMORY
