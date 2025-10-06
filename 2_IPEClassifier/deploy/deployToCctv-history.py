@@ -171,7 +171,7 @@ class RTSPDetector:
 def main():
     # Configuration
     MODEL_PATH = r"C:\Farid\Dokumen\Object Detection\1_PersonClassified\CV_model\CCTV.torchscript"
-    RTSP_URL = "rtsp://admin:CemaraMas2025!@192.168.2.190:554/Streaming/Channels/101"
+    RTSP_URL = "rtsp://{USERNAME}:{PASSWORD}@{DVR_IP}:554/ch0{CHANNEL}.264"
     CONF_THRESHOLD = 0.5
     
     # Create and run detector
