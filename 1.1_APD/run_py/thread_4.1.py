@@ -20,7 +20,7 @@ class SelectiveFrameProcessor:
     
     def __init__(self, source=0, fps=30, processing_interval=0.5, is_rtsp=False, display_width=640, 
                 model_path="path/to/your/model.pt", 
-                conf_threshold=0.5, alert_classes_path=None, log_file="detection_log.txt"):
+                conf_threshold=0.5, alert_classes_path=None, log_file="detection_log.csv"):
         """
         Args:
             source: Camera device index (int) or RTSP URL (string)
@@ -50,7 +50,7 @@ class SelectiveFrameProcessor:
         self.alert_classes_path = alert_classes_path
         self.alert_classes = self._initialize_alert_classes()
         self.alert_cooldown = {}  # Track last alert time per class
-        self.alert_cooldown_duration = 5  # Seconds between alerts for same class
+        self.alert_cooldown_duration = 2  # Seconds between alerts for same class
         self.active_alerts = set()  # Currently triggered alert classes
         
         # Initialize capture based on source type
@@ -106,21 +106,7 @@ class SelectiveFrameProcessor:
             print(f"Logging enabled: {self.log_file}")
         except Exception as e:
             print(f"Log initialization warning: {e}")
-
-    def _log_detection(self, class_id, class_name, confidence, frame_num, is_alert=False):
-        """Log detection event to file"""
-        try:
-            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-            alert_flag = "YES" if is_alert else "NO"
-            
-            log_entry = f"{timestamp},{frame_num},{class_id},{class_name},{confidence:.3f},{alert_flag}\n"
-            
-            with open(self.log_file, 'a') as f:
-                f.write(log_entry)
-                
-        except Exception as e:
-            print(f"Logging error: {e}")  # Silent fail - don't break main functionality
-            
+         
     def _log_detection(self, class_id, class_name, confidence, frame_num, is_alert=False):
         """Log detection event to file"""
         try:
@@ -254,47 +240,7 @@ class SelectiveFrameProcessor:
         except Exception as e:
             print(f"YOLO inference error: {e}")
             return frame, 0             
-
-
-    def _add_info_overlay(self, frame, frame_num, processed_count, detections_count):
-        """Add informational text overlay to the frame with YOLO-specific info"""
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        source_type = "RTSP" if self.is_rtsp else "Camera"
-        
-        # Scale font size based on display width
-        font_scale = 0.5 if self.display_width <= 640 else 0.7
-        thickness = 1 if self.display_width <= 640 else 2
-        
-        # Add different colored text for better visibility
-        cv.putText(frame, f"Source: {source_type}", (10, 25), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 255), thickness)
-        cv.putText(frame, f"Frame: {frame_num}", (10, 45), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0), thickness)
-        cv.putText(frame, f"Processed: {processed_count}", (10, 65), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 0), thickness)
-        cv.putText(frame, f"Detections: {detections_count}", (10, 85), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
-        cv.putText(frame, f"Total Detections: {self.detection_count}", (10, 105), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
-        
-        # Add alert status
-        alert_status = f"Active Alerts: {len(self.active_alerts)}"
-        alert_color = (0, 0, 255) if self.active_alerts else (0, 255, 0)
-        cv.putText(frame, alert_status, (10, 125), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale, alert_color, thickness)
-        
-        # Add alert classes if any are active
-        if self.active_alerts:
-            alert_text = "Alerts: " + ", ".join([self.alert_classes[class_id] for class_id in self.active_alerts])
-            cv.putText(frame, alert_text, (10, 145), 
-                      cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (0, 0, 255), 1)
-        
-        cv.putText(frame, f"Time: {timestamp}", (10, 160), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
-        cv.putText(frame, f"Interval: {self.processing_interval}s", (10, 175), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
-        cv.putText(frame, "Press ESC to exit", (10, 190), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
+    
     def start(self):
         """Start both capture and processing threads"""
         self.running = True
@@ -379,33 +325,7 @@ class SelectiveFrameProcessor:
         else:
             print("RTSP reconnection failed")
     
-    def _run_yolo_detection(self, frame, frame_num):
-        """Run YOLO object detection on a single frame"""
-        try:
-            # Run YOLO inference:cite[1]
-            results = self.model.predict(
-                source=frame,
-                conf=self.conf_threshold,
-                verbose=False  # Set to True for detailed inference info
-            )
-            
-            # Check for alerts
-            self._check_alerts(results, frame_num)
-            
-            # Process results
-            if results and len(results) > 0:
-                # Annotate frame with detections:cite[1]
-                annotated_frame = results[0].plot()
-                detections_count = len(results[0].boxes) if results[0].boxes else 0
-                self.detection_count += detections_count
-                return annotated_frame, detections_count
-            
-            return frame, 0
-            
-        except Exception as e:
-            print(f"YOLO inference error: {e}")
-            return frame, 0
-                
+               
     def _processing_loop(self):
         """Run YOLO detection on frames at fixed time intervals"""
         print("YOLO processing thread started - sampling frames at fixed intervals")

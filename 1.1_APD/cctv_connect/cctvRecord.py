@@ -26,7 +26,7 @@ print("Successfully connected to DVR stream")
 
 # Generate unique filename with timestamp
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-output_filename = f'cctv_captured/output_{timestamp}.avi'
+output_filename = f'output_{timestamp}.avi'
 
 
 # Define the codec and create VideoWriter object
