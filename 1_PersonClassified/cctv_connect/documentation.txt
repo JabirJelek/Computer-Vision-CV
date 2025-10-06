@@ -1,5 +1,5 @@
 """
-CCTVDETECT.PY
+CCTVRECORD.PY
 
 1. PURPOSE:
 RTSP stream capture and recording system for DVR/CCTV cameras with automatic reconnection and timestamped video output.
