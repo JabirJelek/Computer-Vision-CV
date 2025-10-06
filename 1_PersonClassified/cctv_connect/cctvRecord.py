@@ -2,12 +2,11 @@ import cv2
 import time
 from datetime import datetime
 
-# Construct RTSP URL f"rtsp://{USERNAME}:{PASSWORD}@{DVR_IP}:554/Streaming/Channels/{CHANNEL}0{STREAM_TYPE+1}"
-rtsp_url = ""
+rtsp_url = input("Enter the RTSP URL: ")
 
-# Alternative formats to try if above doesn't work:
-# rtsp_url = f"rtsp://{USERNAME}:{PASSWORD}@{DVR_IP}:554/cam/realmonitor?channel={CHANNEL}&subtype={STREAM_TYPE}"
-# rtsp_url = f"rtsp://{USERNAME}:{PASSWORD}@{DVR_IP}:554/ch0{CHANNEL}.264"
+if not rtsp_url.startswith('rtsp://'):
+    print("That doesn't look like a valid RTSP URL. Please try again.")
+    exit()
 
 # Initialize video capture with buffer optimization
 cap = cv2.VideoCapture(rtsp_url)
