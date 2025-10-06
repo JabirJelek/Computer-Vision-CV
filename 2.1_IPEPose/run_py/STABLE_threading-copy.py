@@ -19,7 +19,7 @@ class SelectiveFrameProcessor:
     """
     
     def __init__(self, source=0, fps=30, processing_interval=0.5, is_rtsp=False, display_width=640, 
-                 model_path="path/to/your/model.pt", conf_threshold=0.5):
+                 model_path=r"D:\RaihanFarid\Dokumen\Object Detection\CV_model\CCTV2.onnx", conf_threshold=0.5):
         """
         Args:
             source: Camera device index (int) or RTSP URL (string)
