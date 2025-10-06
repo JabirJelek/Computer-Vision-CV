@@ -1,6 +1,13 @@
 # This class can be used in some threading .py file
-# alert_classes.config - New format with cooldown times
-# Format: Class_ID:Class_Name:cooldown_time
+# bbox_label_config.txt
+# Format: detected_class_id:display_label:color_bgr:confidence_threshold
+# Colors in BGR format: blue,green,red
+#0:Guard:0,255,0:0.7
+#1:Visitor:255,255,0:0.6
+#2:Intruder:0,0,255:0.8
+#3:Vehicle:255,0,255:0.5
+#5:Package:255,165,0:0.7
+
 #0:person:5      # Class 0 (person) - 5 second cooldown
 #2:car:3         # Class 2 (car) - 3 second cooldown  
 #3:bicycle:10    # Class 3 (bicycle) - 10 second cooldown
@@ -15,4 +22,6 @@
 #5:person_without_mask_nonForklift
 
 # These classes is for detectMe
-0: person
+0:ALERT!:255,255,0:0.4
+
+
