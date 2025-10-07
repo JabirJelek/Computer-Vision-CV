@@ -536,6 +536,7 @@ class SelectiveFrameProcessor:
     def _draw_custom_bounding_boxes(self, frame, results):
         """
         Draw custom bounding boxes with personalized labels and colors
+        NOW ONLY DISPLAYS CLASSES THAT ARE IN ALERT_CLASSES.TXT
         Returns: annotated frame
         """
         if not results or len(results) == 0 or not results[0].boxes:
@@ -547,6 +548,10 @@ class SelectiveFrameProcessor:
         for box in boxes:
             class_id = int(box.cls.item())
             confidence = box.conf.item()
+            
+            # ONLY display if this class is in alert_classes
+            if class_id not in self.alert_classes:
+                continue  # Skip classes not in alert_classes.txt
             
             # Get original coordinates
             x1, y1, x2, y2 = box.xyxy[0].tolist()
@@ -594,8 +599,13 @@ class SelectiveFrameProcessor:
     def _get_bbox_display_properties(self, class_id, confidence):
         """
         Determine display properties for a bounding box based on custom configuration
+        NOW ONLY PROCESSES CLASSES THAT ARE IN ALERT_CLASSES.TXT
         Returns: (label, color, should_display)
         """
+        # Only display if class is in alert_classes
+        if class_id not in self.alert_classes:
+            return "", (0, 0, 0), False
+        
         # Check if we have custom configuration for this class
         if class_id in self.bbox_label_map:
             config = self.bbox_label_map[class_id]
@@ -605,16 +615,13 @@ class SelectiveFrameProcessor:
             else:
                 return "", (0, 0, 0), False  # Don't display if below threshold
         
-        # Default behavior - use model's class names
-        if hasattr(self.model, 'names') and self.model.names:
-            default_label = self.model.names.get(class_id, f"class_{class_id}")
-            # Use color based on class_id for variety
-            colors = [(0, 255, 0), (255, 0, 0), (0, 0, 255), (255, 255, 0), 
-                     (255, 0, 255), (0, 255, 255), (128, 0, 128)]
-            color = colors[class_id % len(colors)]
-            return default_label, color, True
-        
-        return f"class_{class_id}", (0, 255, 0), True
+        # Default behavior - use alert class name and default color
+        alert_class_name = self.alert_classes.get(class_id, f"class_{class_id}")
+        # Use color based on class_id for variety
+        colors = [(0, 255, 0), (255, 0, 0), (0, 0, 255), (255, 255, 0), 
+                 (255, 0, 255), (0, 255, 255), (128, 0, 128)]
+        color = colors[class_id % len(colors)]
+        return alert_class_name, color, True
 
     def reload_bbox_labels(self, new_config_path=None):
         """Reload custom bounding box label configuration"""
@@ -638,6 +645,44 @@ class SelectiveFrameProcessor:
         if class_id in self.bbox_label_map:
             del self.bbox_label_map[class_id]
             print(f"Removed custom bbox label for class {class_id}")
+
+    def _draw_styled_bounding_box(self, frame, x1, y1, x2, y2, label, color, confidence):
+        """Draw bounding box with advanced styling options"""
+        thickness = 3
+        alpha = 0.6  # Transparency for fill
+        
+        # Create overlay for filled rectangle
+        overlay = frame.copy()
+        
+        # Filled rectangle with transparency
+        cv.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+        cv.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+        
+        # Outer border
+        cv.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
+        
+        # Inner border
+        inner_thickness = 1
+        cv.rectangle(frame, (x1 + thickness, y1 + thickness), 
+                     (x2 - thickness, y2 - thickness), (255, 255, 255), inner_thickness)
+        
+        # Label with background
+        label_text = f"{label} {confidence:.2f}"
+        font_scale = 0.6
+        font_thickness = 2
+        
+        label_size = cv.getTextSize(label_text, cv.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)[0]
+        label_y = y1 - 10 if y1 - 10 > 20 else y1 + 20
+        
+        # Label background
+        cv.rectangle(frame, (x1, label_y - label_size[1] - 10),
+                     (x1 + label_size[0] + 10, label_y + 5), color, -1)
+        
+        # Label text
+        cv.putText(frame, label_text, (x1 + 5, label_y), 
+                   cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thickness)
+        
+        return frame
 
 def main():
     """
