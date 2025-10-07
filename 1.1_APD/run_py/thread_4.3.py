@@ -9,19 +9,128 @@ import numpy as np
 import cv2 as cv
 from pathlib import Path
 from ultralytics import YOLO
+import threading
+import queue
+import requests
+import time
+
+import threading
+import queue
+import requests
+import time
+
+class AudioAlertManager:
+    """
+    Manages audio alerts in a separate thread to avoid blocking main processing.
+    """
+    def __init__(self, target_url):
+        self.target_url = target_url
+        self.alert_queue = queue.Queue()
+        self.running = False
+        self.thread = None
+        
+        # Start the alert processing thread
+        self.start()
+    
+    def start(self):
+        """Start the audio alert processing thread."""
+        self.running = True
+        self.thread = threading.Thread(target=self._process_alerts, name="AudioAlertThread")
+        self.thread.daemon = True  # Daemon thread will exit when main thread exits
+        self.thread.start()
+        print("Audio Alert Manager started.")
+    
+    def trigger_alert(self, class_name, confidence):
+        """Add an alert to the queue for processing (non-blocking)."""
+        alert_data = {
+            'class_name': class_name,
+            'confidence': confidence,
+            'timestamp': time.time()
+        }
+        try:
+            self.alert_queue.put(alert_data, block=False)
+            print(f"🎵 Audio alert queued: {class_name}")
+        except queue.Full:
+            print("⚠️  Alert queue full, dropping alert.")
+    
+    def _process_alerts(self):
+        """Process alerts from the queue (runs in separate thread)."""
+        while self.running:
+            try:
+                # Wait for next alert with timeout to allow checking self.running
+                alert_data = self.alert_queue.get(timeout=1.0)
+                
+                # Send HTTP POST request
+                self._send_audio_alert(alert_data)
+                
+                # Mark task as done
+                self.alert_queue.task_done()
+                
+            except queue.Empty:
+                continue  # Continue checking self.running
+            except Exception as e:
+                print(f"❌ Error processing audio alert: {e}")
+    
+    def _send_audio_alert(self, alert_data):
+        """Send HTTP GET request with pesan as URL parameter."""
+        try:
+            # === CUSTOMIZE YOUR AUDIO MESSAGES HERE ===
+            class_name = alert_data['class_name']
+            confidence = alert_data['confidence']
+            
+            # Create custom messages based on the detected class
+            if class_name == "person_with_helmet_forklift":
+                message = "Forklift Operator tanpa masker terdeteksi"
+            elif class_name == "person_with_mask_forklift":
+                message = "Forklift Operator tanpa helm terdeteksi"  
+            elif class_name == "person_without_mask_helmet_forklift":
+                message = "Forklift Operator tanpa masker dan helm terdeteksi"
+            elif class_name == "person_without_mask_nonForklift":
+                message = "Non forklift operator tanpa masker terdeteksi "
+            # === END OF CUSTOM MESSAGES ===
+            
+            # URL encode the message to handle spaces and special characters
+            import urllib.parse
+            encoded_message = urllib.parse.quote(message)
+            
+            # Build the URL with the pesan parameter
+            url_with_params = f"{self.target_url}?pesan={encoded_message}"
+            
+            # Send GET request
+            response = requests.get(url_with_params, timeout=5)
+            
+            # Check for successful response
+            if response.status_code == 200:
+                print(f"✅ Audio alert sent for {class_name}")
+                print(f"🔊 Custom Message: '{message}'")
+            else:
+                print(f"⚠️ Server returned status {response.status_code}")
+                
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Network error sending audio alert: {e}")
+        except Exception as e:
+            print(f"❌ Unexpected error sending audio alert: {e}")
+   
+    def stop(self):
+        """Stop the alert processing thread."""
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=2.0)
+        print("Audio Alert Manager stopped.")
 
 class SelectiveFrameProcessor:
     """
     A two-thread system for efficient frame capture with YOLO object detection:
     - Capture Thread: Continuously captures frames, keeping only the latest
     - Processing Thread: Samples frames at fixed intervals for YOLO inference
+    - will display class if exist in alert_classes.txt
     Supports both camera devices and RTSP streams
     """
     
     def __init__(self, source=0, fps=30, processing_interval=0.5, is_rtsp=False, display_width=640, 
                 model_path="path/to/your/model.pt", 
                 conf_threshold=0.5, alert_classes_path=None, log_file="detection_log.csv",
-                bbox_label_config_path=None):
+                bbox_label_config_path=None, audio_alert_url=None):
         """
         Args:
             source: Camera device index (int) or RTSP URL (string)
@@ -100,6 +209,14 @@ class SelectiveFrameProcessor:
         # Initialize custom bounding box labeling system
         self.bbox_label_config_path = bbox_label_config_path
         self.bbox_label_map = self._initialize_bbox_labeling()
+        
+        # Initialize the audio alert system
+        self.audio_alert_url = audio_alert_url
+        self.audio_alert_manager = None
+        
+        if self.audio_alert_url:
+            self.audio_alert_manager = AudioAlertManager(self.audio_alert_url)
+            print(f"Audio alerts enabled for URL: {audio_alert_url}")        
         
     def _initialize_bbox_labeling(self):
         """
@@ -256,20 +373,24 @@ class SelectiveFrameProcessor:
                 
                 # Check if this class is in our alert classes
                 if class_id in self.alert_classes:
+                    alert_class_name = self.alert_classes[class_id]  # Define it HERE, at the outer level
+                    
                     # Check cooldown for this class
                     last_alert = self.alert_cooldown.get(class_id, 0)
                     if current_time - last_alert >= self.alert_cooldown_duration:
                         # Trigger alert
-                        alert_class_name = self.alert_classes[class_id]
                         newly_triggered.add(class_id)
                         self.alert_cooldown[class_id] = current_time
                         
                         # Log the alert
                         self._log_detection(class_id, alert_class_name, confidence, frame_num, is_alert=True)
                         
-                        # Print alert message
-                        alert_msg = f"🚨 ALERT: {alert_class_name} detected (Confidence: {confidence:.2f})"
-                        print(alert_msg)
+                        print(f"🚨 ALERT: {alert_class_name} (Confidence: {confidence:.2f})")
+                    
+                    # CONDITIONAL AUDIO ALERT TRIGGER - NOW alert_class_name IS ALWAYS DEFINED
+                    if self.audio_alert_manager and self.audio_alert_url:
+                        # Trigger audio alert in separate thread
+                        self.audio_alert_manager.trigger_alert(alert_class_name, confidence)
             
             # FIX: Update active alerts without clearing previous ones
             self.active_alerts.update(newly_triggered)
@@ -684,6 +805,8 @@ class SelectiveFrameProcessor:
         
         return frame
 
+
+
 def main():
     """
     Demonstration of the SelectiveFrameProcessor with YOLO Object Detection
@@ -721,6 +844,13 @@ def main():
                 print("Using default bounding box labels")
             else:
                 print(f"Using custom bbox labels from: {bbox_label_config_path}")
+                
+            audio_alert_url = input("Enter audio alert URL (or press Enter to disable): ").strip()
+            if not audio_alert_url:
+                audio_alert_url = None
+                print("Audio alerts disabled")
+            else:
+                print(f"Audio alerts enabled for: {audio_alert_url}")                
 
             
             if not model_path:
@@ -735,7 +865,8 @@ def main():
                 display_width=display_width,
                 model_path=model_path,
                 alert_classes_path=alert_classes_path if alert_classes_path else None,
-                bbox_label_config_path=bbox_label_config_path        
+                bbox_label_config_path=bbox_label_config_path,        
+                audio_alert_url=audio_alert_url
             )
             break
         elif choice == '2':
@@ -754,7 +885,15 @@ def main():
                 bbox_label_config_path = None
                 print("Using default bounding box labels")
             else:
-                print(f"Using custom bbox labels from: {bbox_label_config_path}")            
+                print(f"Using custom bbox labels from: {bbox_label_config_path}")
+
+            audio_alert_url = input("Enter audio alert URL (or press Enter to disable): ").strip()
+            if not audio_alert_url:
+                audio_alert_url = None
+                print("Audio alerts disabled")
+            else:
+                print(f"Audio alerts enabled for: {audio_alert_url}")                
+                            
             
             if not model_path:
                 model_path = "yolo11n.pt"
@@ -767,7 +906,8 @@ def main():
                 display_width=display_width,
                 model_path=model_path,
                 alert_classes_path=alert_classes_path if alert_classes_path else None,
-                bbox_label_config_path=bbox_label_config_path        
+                bbox_label_config_path=bbox_label_config_path,     
+                audio_alert_url=audio_alert_url   
             )
             break
         else:
