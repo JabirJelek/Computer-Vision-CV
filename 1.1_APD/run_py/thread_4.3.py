@@ -124,6 +124,7 @@ class SelectiveFrameProcessor:
     - Capture Thread: Continuously captures frames, keeping only the latest
     - Processing Thread: Samples frames at fixed intervals for YOLO inference
     - will display class if exist in alert_classes.txt
+    - will output audio if specified the url for it
     Supports both camera devices and RTSP streams
     """
     
