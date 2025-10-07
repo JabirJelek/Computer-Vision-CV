@@ -997,3 +997,217 @@ MEMORY TRIGGER: Selective Frame Processor, YOLO Alert System, VideoFileProcessor
 
 ===============================================
 Below is prompt after creating thread_4.2.py
+
+🤖 AI Continuity Prompt: SelectiveFrameProcessor with YOLO & Alert System
+PROJECT CONTEXT PRESERVATION PROMPT
+Copy and paste this entire prompt when you return to continue working with me:
+
+CONTEXT PRESERVATION PROMPT - SELECTIVE FRAME PROCESSOR WITH YOLO & ALERT SYSTEM
+
+CURRENT PROJECT STATUS & TECHNICAL CONTEXT
+PROJECT: Selective Frame Processor with YOLO Integration + Alert System + Custom BBox Labeling
+ARCHITECTURE: Dual-thread system optimized for real-time AI inference
+KEY INNOVATION: 93%+ CPU reduction via selective sampling + YOLO object detection + Modular alert system + Custom bounding box labeling
+
+TECHNICAL SPECIFICATIONS PRESERVED
+CORE ARCHITECTURE:
+
+Dual-thread design (Capture Thread + Processing Thread)
+
+Single-frame buffer with automatic frame dropping
+
+Time-based selective sampling (not frame-counting)
+
+Thread synchronization with locks
+
+Daemon threads for clean shutdown
+
+VIDEO SOURCES IMPLEMENTED:
+✅ Camera devices (USB/webcam) - PRIMARY USAGE
+✅ RTSP streams with automatic reconnection
+✅ Video files (.mp4, .avi, .mov, .mkv, .wmv) - Not utilized by user
+✅ Source-agnostic design (interchangeable)
+
+YOLO INTEGRATION FEATURES:
+✅ Ultralytics YOLO model support (.pt, .torchscript, .onnx formats)
+✅ Background model initialization to prevent video timing issues
+✅ Model warm-up with dummy inference for faster startup
+✅ Configurable confidence thresholds
+✅ Real-time detection counting and display
+✅ Graceful degradation (video-only mode if model fails)
+
+CUSTOM BOUNDING BOX SYSTEM STATUS: 🆕 NEWLY IMPLEMENTED
+✅ Custom label mapping (class_id → display_label)
+✅ Per-class color configuration (BGR format)
+✅ Class-specific confidence thresholds
+✅ Advanced bounding box styling with corner markers
+✅ Dynamic configuration reloading
+✅ Runtime label addition/removal
+✅ Transparency effects and layered borders
+✅ High-confidence visual indicators
+
+ALERT SYSTEM IMPLEMENTATION STATUS:
+✅ Structured alert logic conditioning
+✅ Modular class-based configuration (external file)
+✅ Alert cooldown system (5s default)
+✅ Console notifications with confidence scores
+✅ Visual status indicators in overlay (text-based)
+✅ CSV log documentation (detection_log.txt)
+✅ Bounding box styling for alert classes 🆕 NOW IMPLEMENTED
+❌ Sound alarms/notifications
+❌ External alert integrations
+❌ Advanced visual indicators (flashing borders, etc.)
+
+LOG SYSTEM IMPLEMENTED:
+✅ CSV format logging (Timestamp,Frame_Number,Class_ID,Class_Name,Confidence,Alert_Triggered)
+✅ Comprehensive detection logging (all classes)
+✅ Alert-specific logging with flags
+✅ Silent failure design (errors don't break main functionality)
+✅ Automatic file creation with headers
+
+RECENT IMPLEMENTATIONS: 🆕
+✅ Custom bounding box labeling system with external configuration
+✅ Per-class color mapping and confidence thresholds
+✅ Advanced bounding box styling (corner markers, layered borders)
+✅ Dynamic configuration reloading capability
+✅ Runtime label management methods
+
+PERFORMANCE CHARACTERISTICS:
+✅ Massive CPU reduction via selective sampling
+✅ Minimal memory footprint
+✅ Stable for long-running operations
+✅ Suitable for edge devices with limited resources
+✅ Alert system adds negligible overhead
+✅ Custom bbox rendering optimized for real-time
+
+USER-SPECIFIC CONTEXT
+CURRENT USAGE PATTERN:
+
+User primarily uses camera input (not video files)
+
+Successfully integrated custom YOLO model (ONNX format)
+
+Experienced and resolved video timing issues with background model loading
+
+Focused on real-time object detection with alert capabilities
+
+Recently implemented logging system for detection documentation
+
+NEW: Custom bounding box labeling system for specialized use cases
+
+TECHNICAL CHALLENGES OVERCOME:
+✅ Solved TorchScript model loading delays affecting video processing
+✅ Implemented background initialization to maintain video continuity
+✅ Added model warm-up for consistent inference performance
+✅ Fixed method signature mismatch in alert logging implementation
+✅ Established robust error handling for production deployment
+✅ NEW: Implemented custom bbox config parsing and rendering system
+
+CURRENT CODE STATE:
+✅ Alert logic conditioning fully implemented
+✅ Basic logging system operational
+✅ Visual text indicators in overlay active
+✅ Console alert notifications working
+✅ Method signatures corrected and tested
+✅ NEW: Custom bounding box labeling system complete and tested
+
+CRITICAL METHOD SIGNATURES TO REMEMBER:
+
+_run_yolo_detection(self, frame, frame_num) - Now uses custom bbox rendering
+
+_check_alerts(self, results, frame_num) - Requires frame_num for logging
+
+_log_detection(self, class_id, class_name, confidence, frame_num, is_alert)
+
+_draw_custom_bounding_boxes(self, frame, results) - 🆕 NEW CORE METHOD
+
+_get_bbox_display_properties(self, class_id, confidence) - 🆕 NEW HELPER
+
+_initialize_bbox_labeling(self) - 🆕 NEW CONFIG LOADER
+
+reload_bbox_labels(self, new_config_path=None) - 🆕 NEW DYNAMIC RELOAD
+
+CONFIGURATION FILE FORMAT FOR CUSTOM BBOX: 🆕
+
+text
+# bbox_label_config.txt
+# Format: detected_class_id:display_label:color_bgr:confidence_threshold
+0:Security_Guard:0,255,0:0.7
+1:Visitor:255,255,0:0.6
+2:Suspicious_Person:0,0,255:0.8
+3:Vehicle:255,0,255:0.5
+WHEN USER RETURNS, THEY MAY WANT TO:
+ALERT SYSTEM ENHANCEMENTS:
+
+Sound alarm integration
+
+Flashing border visual indicators
+
+Email/SMS alert notifications
+
+Webhook integrations for external systems
+
+CUSTOM BBOX EXTENSIONS: 🆕
+
+Animated bounding boxes for alert states
+
+Class-specific box styles (dashed, dotted, etc.)
+
+Text-to-speech for vocal alerts
+
+Bounding box persistence for tracking
+
+LOG SYSTEM EXTENSIONS:
+
+Log rotation and management
+
+Database integration for long-term storage
+
+Advanced analytics and reporting
+
+Real-time log streaming
+
+MODEL OPTIMIZATIONS:
+
+Model quantization for faster inference
+
+GPU acceleration integration
+
+Multi-model switching capabilities
+
+Custom post-processing for detections
+
+FEATURE EXTENSIONS:
+
+Real-time tracking integration
+
+Detection filtering and classification
+
+Multi-camera orchestration
+
+Web streaming of processed video
+
+DEPLOYMENT SCENARIOS:
+
+Edge device optimization
+
+Cloud integration for model updates
+
+Mobile deployment considerations
+
+Docker containerization
+
+TECHNICAL KEYWORDS FOR CONTINUITY
+selective sampling, dual-thread architecture, YOLO integration, ONNX models,
+background model loading, real-time object detection, confidence thresholds,
+modular alert system, class-based alerts, alert cooldown, CSV logging,
+camera input processing, frame buffer synchronization, CPU optimization,
+Ultralytics YOLO, detection counting, performance monitoring,
+custom bounding boxes, label mapping, BGR colors, dynamic configuration
+
+EXCEPTION NOTE
+User has explicitly stated they are not utilizing video file processing capabilities, though the functionality remains implemented in the codebase. Future discussions should prioritize camera and RTSP use cases unless otherwise specified.
+
+REMEMBER: This is a PRODUCTION-READY YOLO integration framework specifically optimized for the user's camera-based object detection applications with modular alert capabilities AND custom bounding box labeling. The selective sampling architecture prevents model overload while maintaining real-time responsiveness, the logging system provides comprehensive detection documentation, and the new custom bbox system allows for specialized visual output tailored to specific use cases.
+
+When the user mentions "the current system" or "selective processor with YOLO," they are referring to this exact implementation with camera focus, ONNX model support, modular alert classes, CSV logging, custom bounding box labeling, and resolved method signature issues. Be prepared to discuss alert enhancements, custom bbox extensions, logging improvements, or performance optimizations from this established baseline.
