@@ -1,0 +1,13 @@
+# This file is used to change the class name of each label. Sure it can 
+# be used without this file, but this could make the labelling modular,
+# which makes it easier if we want to give custom name for custom label
+# and its own color.
+
+# Format: detected_class_id:display_label:color_bgr:confidence_threshold
+
+
+# These classes is for production room
+0:'NO MASK USED ALERT!':0,0,255:0.5
+1:'NO HELMET USED ALERT!':0,0,255:0.5
+4:'MISSING PROTECTION':0,0,255:0.5
+5:'NO MASK USED ALERT!':0,0,255:0.5

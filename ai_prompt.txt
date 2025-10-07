@@ -992,3 +992,8 @@ print("Active alerts:", processor.active_alerts)
 # To modify alert cooldown:
 processor.set_alert_cooldown(10)  # 10 second cooldown
 MEMORY TRIGGER: Selective Frame Processor, YOLO Alert System, VideoFileProcessor, Alert Class Configuration, Active Alerts, CSV Logging
+
+
+
+===============================================
+Below is prompt after creating thread_4.2.py
