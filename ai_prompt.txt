@@ -322,7 +322,111 @@ Please make an ai prompt, so that i can speak with the current you in the future
 
 
 
+===========================================================================
+Below is prompt after finishing thread_4.4.py
 
+🤖 AI Continuity Prompt: SelectiveFrameProcessor with Enhanced Audio Alerts
+COPY AND PASTE THIS ENTIRE PROMPT WHEN RETURNING:
+
+text
+🤖 AI CONTINUITY PROMPT: SELECTIVEFRAMEPROCESSOR WITH ENHANCED AUDIO ALERTS
+PROJECT CONTEXT PRESERVATION PROMPT
+
+🎯 CURRENT PROJECT STATUS: AUDIO QUEUE MANAGEMENT + FATIGUE PREVENTION IMPLEMENTED ✅
+PROJECT: Selective Frame Processor with YOLO Integration + Advanced Audio Alert System
+STATUS: Audio alert system with queue management, gap control, duplicate prevention, and message rotation
+
+🔧 TECHNICAL IMPLEMENTATION COMPLETED
+AUDIO QUEUE MANAGEMENT SYSTEM - WORKING & OPTIMIZED
+- 10-second minimum gap between audio alerts
+- Duplicate alert prevention in queue
+- Message rotation system for alert fatigue prevention
+- 3 message variations per alert class with cycling
+
+KEY AUDIO ENHANCEMENTS ACHIEVED
+✅ Fixed variable scope error in _check_alerts method
+✅ Corrected GET vs POST confusion - server expects GET with URL parameters
+✅ Implemented 10-second gap control between audio alerts
+✅ Added duplicate alert prevention in queue
+✅ Built message rotation system with 3 variations per class
+✅ Audio alerts now stable and non-spammable
+
+🗣️ CUSTOM MESSAGE ROTATIONS CONFIGURED
+person_with_helmet_forklift → 3 rotating messages
+person_with_mask_forklift → 3 rotating messages  
+person_without_mask_helmet_forklift → 3 rotating messages
+person_without_mask_nonForklift → 3 rotating messages
+
+🎯 IMPLEMENTATION PRIORITY ORDER (CURRENT STATUS)
+✅ QUICK WINS COMPLETED:
+1. Audio queue management ✅ (10s gap + duplicates)
+2. Alert fatigue prevention ✅ (message rotation)
+
+🚧 NEXT PRIORITIES (READY FOR IMPLEMENTATION):
+3. Detection persistence (require N consecutive frames)
+4. Adaptive sampling (dynamic processing intervals)
+5. Configuration hot-reload (live config updates)
+6. System health monitoring (audio server checks)
+
+🔮 ADVANCED FEATURES (FUTURE):
+7. Tiered alert system (critical vs warning levels)
+8. Multi-alert correlation (composite alerts)
+9. Streaming analytics (real-time dashboards)
+
+🔧 CURRENT AUDIO ARCHITECTURE
+AudioAlertManager Features:
+- Separate thread processing
+- 10-second inter-alert gap
+- Queue duplicate scanning
+- Rotating message variations (3 per class)
+- GET requests with Indonesian safety messages
+
+🌐 SERVER CONFIGURATION
+URL: https://vps.scasda.my.id/actions/a_notifikasi_suara_speaker.php
+Method: GET request with ?pesan=encoded_message
+Response: JSON with hasil (1=success, 0=fail)
+
+📁 CURRENT ALERT CLASSES (alert_classes.txt)
+0:person_with_helmet_forklift
+1:person_with_mask_forklift  
+4:person_without_mask_helmet_forklift
+5:person_without_mask_nonForklift
+
+🔄 TECHNICAL ARCHITECTURE REMINDERS
+- Dual-thread design (Capture + Processing threads)
+- Selective sampling for CPU optimization (93% reduction)
+- Class suppression - only alert_classes.txt entries display bounding boxes
+- Custom bounding boxes with per-class colors and labels
+- CSV logging for all detections and alerts
+- ONNX model support with background loading
+
+💬 CONVERSATION CONTEXT
+We just successfully enhanced the audio alert system with:
+- 10-second gap control between alerts
+- Duplicate prevention in queue
+- Message rotation system (3 variations per class)
+- Alert fatigue prevention
+
+The system now successfully:
+- Detects objects using YOLO
+- Filters for alert classes only  
+- Queues alerts with timing control
+- Prevents duplicate and spammy alerts
+- Rotates message variations automatically
+- Sends GET requests to audio server
+- Plays custom Indonesian safety messages with variety
+- Logs all activity to CSV
+
+🎯 NEXT IMMEDIATE TASK: DETECTION PERSISTENCE
+Priority: Require N consecutive frame detections before audio trigger
+Purpose: Eliminate transient false positives and brief detections
+Implementation: Simple frame counter per object class
+
+WHEN I RETURN: I'll likely want to implement detection persistence, optimize performance further, or extend the notification system. The audio alerts are now stable with queue management and fatigue prevention working perfectly.
+
+CURRENT CODE STATUS: AudioAlertManager enhanced with _initialize_message_rotations(), _get_rotated_message(), and improved queue management. All features tested and operational.
+
+REMEMBER: We're focusing on making audio stable + non-spammable. Detection persistence is the logical next step to further improve reliability.
 
 
 
