@@ -127,7 +127,7 @@ class AudioAlertManager:
         self.last_alert_time = 0
         self.min_alert_gap = 60.0
         
-        # NEW: Alert fatigue prevention
+        #   Alert fatigue prevention
         self.message_rotations = self._initialize_message_rotations()
         self.last_message_index = {}
         
@@ -211,7 +211,7 @@ class AudioAlertManager:
         """Process alerts from the queue with timing control"""
         while self.running:
             try:
-                # NEW: Add gap control before processing next alert
+                #   Add gap control before processing next alert
                 current_time = time.time()
                 time_since_last_alert = current_time - self.last_alert_time
                 
@@ -225,7 +225,7 @@ class AudioAlertManager:
                 self._send_audio_alert(alert_data)
                 self.alert_queue.task_done()
                 
-                # NEW: Update last alert time after sending
+                #   Update last alert time after sending
                 self.last_alert_time = time.time()
                 
             except queue.Empty:
@@ -339,7 +339,7 @@ class SelectiveFrameProcessor:
         self.alert_cooldown_duration = 5  # Seconds between alerts for same class
         self.active_alerts = set()  # Currently triggered alert classes
         
-        # NEW: Detection persistence system
+        #   Detection persistence system
         self.persistence_enabled = False  # Start disabled by default
         self.persistence_frames = persistence_frames
         self.detection_history = {}  # class_id -> detection history
@@ -405,14 +405,14 @@ class SelectiveFrameProcessor:
             self.audio_alert_manager.min_alert_gap = 5.0  # Now this works!
             print(f"Audio alerts enabled for URL: {audio_alert_url}")
         
-        # NEW: Person tracking system
+        #   Person tracking system
         self.person_trackers = {}  # track_id -> PersonTracker
         self.next_track_id = 1
         self.tracking_enabled = True
         
         print("🧠 Person state tracking system initialized")
 
-    # NEW: DETECTION PERSISTENCE METHODS
+    #   DETECTION PERSISTENCE METHODS
     def enable_detection_persistence(self, persistence_frames=None):
         """
         Enable detection persistence - require N consecutive frames before alerts
@@ -434,6 +434,7 @@ class SelectiveFrameProcessor:
     def _check_persistence(self, class_id, frame_num):
         """
         Check if a detection has persisted for required frames
+        FIXED: Uses time-based tracking instead of frame-based to handle processing intervals
         Returns: (should_alert, current_count)
         """
         if not self.persistence_enabled:
@@ -447,36 +448,46 @@ class SelectiveFrameProcessor:
                 'count': 1,
                 'first_detection': current_time,
                 'last_detection': current_time,
-                'last_frame': frame_num
+                'last_processed_time': current_time,
+                'consecutive_frames': 1
             }
             return False, 1
         
         history = self.detection_history[class_id]
         
-        # Reset if too many frames have passed (object disappeared)
-        if frame_num - history['last_frame'] > 10:  # 10 frame gap resets counter
+        # FIXED: Use time-based gap detection instead of frame-based
+        time_since_last_detection = current_time - history['last_processed_time']
+        max_time_gap = self.processing_interval * 3  # Allow reasonable time gap
+        
+        if time_since_last_detection > max_time_gap:
+            # Reset if too much time has passed (object disappeared)
             history['count'] = 1
+            history['consecutive_frames'] = 1
             history['first_detection'] = current_time
+            history['last_processed_time'] = current_time
         else:
+            # Increment count - object is persistently detected
             history['count'] += 1
+            history['consecutive_frames'] += 1
+            history['last_processed_time'] = current_time
         
         history['last_detection'] = current_time
-        history['last_frame'] = frame_num
         
         # Check if we've reached persistence threshold
-        if history['count'] >= self.persistence_frames:
-            return True, history['count']
+        if history['consecutive_frames'] >= self.persistence_frames:
+            return True, history['consecutive_frames']
         
-        return False, history['count']
+        return False, history['consecutive_frames']
 
-    def _cleanup_detection_history(self, current_frame_num, max_age_frames=50):
-        """Remove old entries from detection history"""
+
+    def _cleanup_detection_history(self, current_time, max_age_seconds=10):
+        """Remove old entries from detection history using time-based cleanup"""
         if not self.persistence_enabled:
             return
         
         stale_classes = []
         for class_id, history in self.detection_history.items():
-            if current_frame_num - history['last_frame'] > max_age_frames:
+            if current_time - history['last_detection'] > max_age_seconds:
                 stale_classes.append(class_id)
         
         for class_id in stale_classes:
@@ -501,9 +512,10 @@ class SelectiveFrameProcessor:
         for class_id, history in self.detection_history.items():
             class_name = self.alert_classes.get(class_id, f"class_{class_id}")
             status['current_counts'][class_name] = {
-                'current': history['count'],
+                'current': history['consecutive_frames'],
                 'required': self.persistence_frames,
-                'progress': f"{history['count']}/{self.persistence_frames}"
+                'progress': f"{history['consecutive_frames']}/{self.persistence_frames}",
+                'time_since_last': time.time() - history['last_detection']
             }
         
         return status
@@ -821,6 +833,7 @@ class SelectiveFrameProcessor:
         
         return best_tracker
 
+# THE _check_alerts METHOD TO USE TIME-BASED CLEANUP:
     def _check_alerts(self, results, frame_num):
         current_time = time.time()
         newly_triggered = set()
@@ -836,11 +849,11 @@ class SelectiveFrameProcessor:
                 self.active_alerts.remove(class_id)
         
         if results and len(results) > 0 and results[0].boxes:
-            # NEW: Run person tracking before individual frame alerts
+            #   Run person tracking before individual frame alerts
             self._track_persons(results, frame_num)
             
-            # NEW: Cleanup old detection history
-            self._cleanup_detection_history(frame_num)
+            # FIXED: Use time-based cleanup instead of frame-based
+            self._cleanup_detection_history(current_time)
             
             for box in results[0].boxes:
                 class_id = int(box.cls.item())
@@ -858,9 +871,9 @@ class SelectiveFrameProcessor:
                 
                 # Check if this class is in our alert classes
                 if class_id in self.alert_classes:
-                    alert_class_name = self.alert_classes[class_id]  # Define it HERE, at the outer level
+                    alert_class_name = self.alert_classes[class_id]
                     
-                    # NEW: Check persistence before alerting
+                    # FIXED: Pass current_time to persistence check
                     should_alert, persistence_count = self._check_persistence(class_id, frame_num)
                     
                     if should_alert:
@@ -876,16 +889,16 @@ class SelectiveFrameProcessor:
                             
                             print(f"🚨 ALERT: {alert_class_name} (Confidence: {confidence:.2f}, Persistence: {persistence_count}/{self.persistence_frames})")
                         
-                        # CONDITIONAL AUDIO ALERT TRIGGER - NOW alert_class_name IS ALWAYS DEFINED
+                        # CONDITIONAL AUDIO ALERT TRIGGER
                         if self.audio_alert_manager and self.audio_alert_url:
                             # Trigger audio alert in separate thread
                             self.audio_alert_manager.trigger_alert(alert_class_name, confidence)
                     else:
-                        # Show persistence progress
-                        if frame_num % 30 == 0:  # Don't spam console
+                        # Show persistence progress (less frequent to reduce spam)
+                        if persistence_count == 1 or persistence_count % 5 == 0:
                             print(f"🔍 Persistence: {alert_class_name} {persistence_count}/{self.persistence_frames} frames")
             
-            # FIX: Update active alerts without clearing previous ones
+            # Update active alerts without clearing previous ones
             self.active_alerts.update(newly_triggered)
             
             # Clear alerts that are no longer active (after their cooldown)
@@ -957,8 +970,8 @@ class SelectiveFrameProcessor:
             cv.putText(frame, alert_text, (10, 145), 
                       cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (0, 0, 255), 1)
         
-        # NEW: Add tracking information
-        tracking_info = f"Persons Tracked: {len(self.person_trackers)}"
+        #   Add tracking information
+        tracking_info = f"Object Tracked: {len(self.person_trackers)}"
         cv.putText(frame, tracking_info, (10, 200), 
                   cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
         
@@ -971,7 +984,7 @@ class SelectiveFrameProcessor:
                       cv.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
             y_offset += 15
         
-        # NEW: Add persistence information
+        #   Add persistence information
         if self.persistence_enabled:
             persistence_info = f"Persistence: {self.persistence_frames} frames"
             cv.putText(frame, persistence_info, (10, 260), 
@@ -1211,7 +1224,7 @@ class SelectiveFrameProcessor:
             display_label, box_color, should_display = self._get_bbox_display_properties(class_id, confidence)
             
             if should_display:
-                # NEW: Try to find tracker for this detection and add tracking info
+                #   Try to find tracker for this detection and add tracking info
                 tracker_info = self._get_tracker_info_for_bbox([x1, y1, x2, y2])
                 
                 if tracker_info:
@@ -1342,6 +1355,27 @@ class SelectiveFrameProcessor:
         # Label text
         cv.putText(frame, label_text, (x1 + 5, label_y), 
                    cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thickness)
+
+
+
+
+    def print_timing_debug(self):
+        """Debug method to show timing information"""
+        if not self.persistence_enabled:
+            print("🔍 Persistence disabled")
+            return
+        
+        print("🔍 Persistence Debug Info:")
+        print(f"  - Processing Interval: {self.processing_interval}s")
+        print(f"  - Required Frames: {self.persistence_frames}")
+        print(f"  - Tracked Classes: {len(self.detection_history)}")
+        
+        for class_id, history in self.detection_history.items():
+            class_name = self.alert_classes.get(class_id, f"class_{class_id}")
+            time_gap = time.time() - history['last_processed_time']
+            max_gap = self.processing_interval * 3
+            print(f"  - {class_name}: {history['consecutive_frames']}/{self.persistence_frames} frames, "
+                f"Time gap: {time_gap:.2f}s (max: {max_gap:.2f}s)")                   
         
         return frame
 
@@ -1394,7 +1428,7 @@ def main():
             else:
                 print(f"Audio alerts enabled for: {audio_alert_url}")                
 
-            # NEW: Detection persistence configuration
+            #   Detection persistence configuration
             persistence_frames = int(input("Enter detection persistence frames (default 5, 1=disabled): ") or "5")
             
             if not model_path:
@@ -1411,7 +1445,7 @@ def main():
                 alert_classes_path=alert_classes_path if alert_classes_path else None,
                 bbox_label_config_path=bbox_label_config_path,        
                 audio_alert_url=audio_alert_url,
-                persistence_frames=persistence_frames  # NEW: Add persistence parameter
+                persistence_frames=persistence_frames  #   Add persistence parameter
             )
             break
         elif choice == '2':
@@ -1439,7 +1473,7 @@ def main():
             else:
                 print(f"Audio alerts enabled for: {audio_alert_url}")                
                             
-            # NEW: Detection persistence configuration
+            #   Detection persistence configuration
             persistence_frames = int(input("Enter detection persistence frames (default 5, 1=disabled): ") or "5")
             
             if not model_path:
@@ -1455,7 +1489,7 @@ def main():
                 alert_classes_path=alert_classes_path if alert_classes_path else None,
                 bbox_label_config_path=bbox_label_config_path,     
                 audio_alert_url=audio_alert_url,
-                persistence_frames=persistence_frames  # NEW: Add persistence parameter
+                persistence_frames=persistence_frames  #   Add persistence parameter
             )
             break
         else:
