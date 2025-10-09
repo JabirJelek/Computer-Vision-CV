@@ -301,7 +301,6 @@ class SelectiveFrameProcessor:
     - will display class if exist in alert_classes.txt
     Supports both camera devices and RTSP streams
     """
-    
     def __init__(self, source=0, fps=30, processing_interval=0.5, is_rtsp=False, display_width=640, 
                 model_path="path/to/your/model.pt", 
                 conf_threshold=0.5, alert_classes_path=None, log_file="detection_log.csv",
