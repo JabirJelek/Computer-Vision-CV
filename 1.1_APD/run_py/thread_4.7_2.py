@@ -13,107 +13,105 @@ import queue
 import requests
 import urllib.parse
 
-class ObjectTracker:
-    def __init__(self, track_id, initial_bbox, class_name, class_id, frame_num):
+class ObjectTracker:  # Was: class PersonTracker
+    """
+    Tracks individual objects across frames and manages state transitions
+    """
+    def __init__(self, track_id, initial_bbox, initial_class, frame_num):
         self.track_id = track_id
         self.bbox = initial_bbox
-        self.class_name = class_name
-        self.class_id = class_id
-        self.state = "APPEARED"
-        self.first_seen = time.time()
-        self.last_seen = time.time()
+        self.current_class = initial_class
+        self.state = "UNKNOWN"
+        self.frame_history = []
         self.last_seen_frame = frame_num
-        self.consecutive_misses = 0
-        self.consecutive_detections = 1
-        self.audio_alert_triggered = False
+        self.creation_frame = frame_num
         
-        # 🆕 CLASS-SPECIFIC STATE THRESHOLDS
-        self.confirmation_threshold, self.disappearance_threshold = self._get_class_thresholds(class_name)
+        # State transition counters
+        self.consecutive_no_mask_frames = 0
+        self.consecutive_mask_frames = 0
         
-        print(f"🎯 Created ObjectTracker {track_id} for {class_name} - State: {self.state} "
-              f"(Confirm: {self.confirmation_threshold}, Disappear: {self.disappearance_threshold})")
+        # State transition thresholds
+        self.no_mask_confirmation_threshold = 20
+        self.mask_compliance_threshold = 30
+        
+        print(f"🎯 Created Object Tracker {track_id} with initial state: {self.state}")  # Updated emoji
 
-    def _get_class_thresholds(self, class_name):
-        """Efficient class-specific threshold lookup"""
-        # Lightweight dictionary - no external dependencies
-        class_thresholds = {
-            "person_with_helmet_forklift": (2, 3),      # Fast confirmation, quick disappearance
-            "person_with_mask_forklift": (3, 5),        # Medium confirmation, standard disappearance  
-            "person_without_mask_helmet_forklift": (1, 2), # Immediate confirmation, fast disappearance
-            "person_without_mask_nonForklift": (3, 7)   # Slower confirmation, longer disappearance
-        }
-        return class_thresholds.get(class_name, (3, 5))  # Default fallback
-
-    # 🆕 Add method to update thresholds dynamically
-    def update_thresholds(self, confirmation=None, disappearance=None):
-        """Update thresholds without recreating tracker"""
-        if confirmation is not None:
-            self.confirmation_threshold = confirmation
-        if disappearance is not None:
-            self.disappearance_threshold = disappearance
-
-    def update(self, bbox, frame_num, detected=True):
-        """Update tracker state based on detection"""
+    def update(self, bbox, class_name, frame_num):
+        """Update tracker with new detection"""
+        self.bbox = bbox
+        self.current_class = class_name
         self.last_seen_frame = frame_num
         
-        if detected:
-            self.bbox = bbox
-            self.last_seen = time.time()
-            self.consecutive_misses = 0
-            self.consecutive_detections += 1
-            
-            # State transitions for detection
-            old_state = self.state
-            if self.state == "APPEARED" and self.consecutive_detections >= self.confirmation_threshold:
-                self.state = "PRESENT"
-                return "CONFIRMED", old_state
-            elif self.state == "DISAPPEARING":
-                self.state = "PRESENT"  # Object reappeared
-                return "REAPPEARED", old_state
-            elif self.state == "GONE":
-                self.state = "APPEARED"  # Object reappeared after being gone
-                self.consecutive_detections = 1
-                return "REAPPEARED", old_state
-                
-        else:
-            self.consecutive_misses += 1
-            self.consecutive_detections = 0
-            
-            # State transitions for misses
-            old_state = self.state
-            if self.state == "PRESENT" and self.consecutive_misses >= self.disappearance_threshold:
-                self.state = "GONE"
-                return "DISAPPEARED", old_state
-            elif self.state == "PRESENT" and self.consecutive_misses > 0:
-                self.state = "DISAPPEARING"
-                return "DISAPPEARING", old_state
-            elif self.state == "APPEARED" and self.consecutive_misses > 2:
-                self.state = "GONE"  # Never confirmed, just disappeared
-                return "DISAPPEARED", old_state
+        # Add to frame history (limit to last 100 frames for memory efficiency)
+        self.frame_history.append({
+            'frame': frame_num,
+            'class': class_name,
+            'timestamp': time.time()
+        })
         
-        return self.state, self.state
+        # Keep only recent history
+        if len(self.frame_history) > 100:
+            self.frame_history.pop(0)
+        
+        return self._check_state_transition()
 
-    def should_trigger_audio(self):
-        """Determine if audio should play based on object state"""
-        # Trigger audio when object first becomes PRESENT and hasn't been alerted yet
-        if self.state == "PRESENT" and not self.audio_alert_triggered:
-            self.audio_alert_triggered = True
-            return True
-        return False
-    
-    def is_stale(self, current_frame_num, threshold=50):
-        """Check if tracker should be removed"""
-        return (current_frame_num - self.last_seen_frame) > threshold
-    
-    def get_state_info(self):
-        return {
-            'track_id': self.track_id,
-            'class_name': self.class_name,
-            'state': self.state,
-            'consecutive_detections': self.consecutive_detections,
-            'consecutive_misses': self.consecutive_misses,
-            'audio_triggered': self.audio_alert_triggered
-        }
+    def _check_state_transition(self):
+        """
+        Check and update state based on frame history
+        Returns: (state_changed, new_state, old_state)
+        """
+        old_state = self.state
+        
+        if len(self.frame_history) < 10:  # Need minimum frames for reliable state
+            self.state = "INITIALIZING"
+            return False, self.state, old_state
+        
+        # Analyze recent frames for state transitions
+        recent_frames = self.frame_history[-max(30, len(self.frame_history)):]  # Last 30 frames or all available
+        
+        # Count mask vs no_mask in recent frames
+        mask_frames = 0
+        no_mask_frames = 0
+        
+        for frame in recent_frames:
+            if "without_mask" in frame['class']:
+                no_mask_frames += 1
+            elif "with_mask" in frame['class']:
+                mask_frames += 1
+        
+        total_recent_frames = len(recent_frames)
+        
+        # State transition logic
+        if self.state in ["UNKNOWN", "INITIALIZING", "COMPLIANT"]:
+            # Check if we should transition to CONFIRMED_NO_MASK
+            if no_mask_frames >= self.no_mask_confirmation_threshold:
+                if self.state != "CONFIRMED_NO_MASK":
+                    self.state = "CONFIRMED_NO_MASK"
+                    return True, self.state, old_state
+        
+        elif self.state == "CONFIRMED_NO_MASK":
+            # Check if person has become compliant
+            if mask_frames >= self.mask_compliance_threshold:
+                self.state = "COMPLIANT"
+                return True, self.state, old_state
+        
+        return False, self.state, old_state
+
+    def get_state_summary(self):
+        """Get summary of current state and statistics"""
+        if not self.frame_history:
+            return "No history"
+        
+        recent_frames = self.frame_history[-30:]  # Last 30 frames
+        mask_count = sum(1 for f in recent_frames if "with_mask" in f['class'])
+        no_mask_count = sum(1 for f in recent_frames if "without_mask" in f['class'])
+        total = len(recent_frames)
+        
+        return f"State: {self.state} | Mask: {mask_count}/{total} | No Mask: {no_mask_count}/{total}"
+
+    def is_stale(self, current_frame_num, stale_threshold=50):
+        """Check if tracker hasn't been updated for too many frames"""
+        return (current_frame_num - self.last_seen_frame) > stale_threshold
 
 class AudioAlertManager:
     """
@@ -125,11 +123,11 @@ class AudioAlertManager:
         self.running = False
         self.thread = None
         
-        # Alert gap control
+        # Existing gap control
         self.last_alert_time = 0
         self.min_alert_gap = 60.0
         
-        # Alert fatigue prevention
+        #   Alert fatigue prevention
         self.message_rotations = self._initialize_message_rotations()
         self.last_message_index = {}
         
@@ -164,7 +162,7 @@ class AudioAlertManager:
         """Start the audio alert processing thread."""
         self.running = True
         self.thread = threading.Thread(target=self._process_alerts, name="AudioAlertThread")
-        self.thread.daemon = True
+        self.thread.daemon = True  # Daemon thread will exit when main thread exits
         self.thread.start()
         print("Audio Alert Manager started.")
     
@@ -213,7 +211,7 @@ class AudioAlertManager:
         """Process alerts from the queue with timing control"""
         while self.running:
             try:
-                # Add gap control before processing next alert
+                #   Add gap control before processing next alert
                 current_time = time.time()
                 time_since_last_alert = current_time - self.last_alert_time
                 
@@ -227,7 +225,7 @@ class AudioAlertManager:
                 self._send_audio_alert(alert_data)
                 self.alert_queue.task_done()
                 
-                # Update last alert time after sending
+                #   Update last alert time after sending
                 self.last_alert_time = time.time()
                 
             except queue.Empty:
@@ -247,9 +245,9 @@ class AudioAlertManager:
             # URL encode the message
             encoded_message = urllib.parse.quote(message)
             
-            # Build and send request
+            # Build and send request (existing code)
             url_with_params = f"{self.target_url}?pesan={encoded_message}"
-            response = requests.get(url_with_params, timeout=10)
+            response = requests.get(url_with_params, timeout=10)  # Increased timeout
             
             if response.status_code == 200:
                 try:
@@ -294,6 +292,7 @@ class AudioAlertManager:
         
         return variations[self.last_message_index[class_name]]
 
+
 class SelectiveFrameProcessor:
     """
     A two-thread system for efficient frame capture with YOLO object detection:
@@ -336,15 +335,26 @@ class SelectiveFrameProcessor:
         # Initialize alert system
         self.alert_classes_path = alert_classes_path
         self.alert_classes = self._initialize_alert_classes()
-        self.alert_cooldown = {}
-        self.alert_cooldown_duration = 5
-        self.active_alerts = set()
+        self.alert_cooldown = {}  # Track last alert time per class
+        self.alert_cooldown_duration = 5  # Seconds between alerts for same class
+        self.active_alerts = set()  # Currently triggered alert classes
+        
+        #   Detection persistence system
+        self.persistence_enabled = False  # Start disabled by default
+        self.persistence_frames = persistence_frames
+        self.detection_history = {}  # class_id -> detection history
+        
+        # Enable persistence if frames > 1
+        if persistence_frames > 1:
+            self.enable_detection_persistence(persistence_frames)
         
         # Initialize capture based on source type
         if self.is_rtsp:
             print(f"Initializing RTSP stream: {source}")
             self.capture = cv.VideoCapture(source)
-            self.capture.set(cv.CAP_PROP_BUFFERSIZE, 1)
+            
+            # Set RTSP-specific options for better performance
+            self.capture.set(cv.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer size
             self.capture.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc(*'H264'))
         else:
             print(f"Initializing camera device: {source}")
@@ -360,7 +370,7 @@ class SelectiveFrameProcessor:
         self.frame_height = int(self.capture.get(cv.CAP_PROP_FRAME_HEIGHT))
         self.actual_fps = self.capture.get(cv.CAP_PROP_FPS)
         
-        # Calculate display dimensions
+        # Calculate display dimensions maintaining aspect ratio
         self.display_height = int((self.display_width / self.frame_width) * self.frame_height)
         
         print(f"Video properties: {self.frame_width}x{self.frame_height} at {self.actual_fps:.2f} FPS")
@@ -385,87 +395,24 @@ class SelectiveFrameProcessor:
         self.bbox_label_config_path = bbox_label_config_path
         self.bbox_label_map = self._initialize_bbox_labeling()
         
-        # Audio alert system
+        # FIXED: Audio alert system initialization
         self.audio_alert_url = audio_alert_url
         self.audio_alert_manager = None
         
         if self.audio_alert_url:
             self.audio_alert_manager = AudioAlertManager(self.audio_alert_url)
-            self.audio_alert_manager.min_alert_gap = 5.0
+            # Optional: Configure gap after creating instance
+            self.audio_alert_manager.min_alert_gap = 5.0  # Now this works!
             print(f"Audio alerts enabled for URL: {audio_alert_url}")
         
-        # STATE SYSTEM: Initialize stateful object tracking
-        self.object_trackers = {}  # track_id -> ObjectTracker
-        self.next_track_id = 1
-        self.tracking_enabled = True
-
-        # Initialize persistence_frames properly
-        self.persistence_frames = persistence_frames
-        self.persistence_enabled = False  # Start disabled by default
-        self.detection_history = {}  # Add this line
-            
-        # Enable persistence if frames > 1
-        if persistence_frames > 1:
-            self.enable_detection_persistence(persistence_frames)
-        
-        # FIX: Remove duplicate tracking systems - use only object_trackers
-        self.object_trackers = {}  # track_id -> ObjectTracker
+        # Object tracking system        
+        self.object_trackers = {}  # Was: self.person_trackers
         self.next_track_id = 1
         self.tracking_enabled = True
         
-        print("🎯 Stateful object tracking system initialized")
+        print("🎯 Object state tracking system initialized")  
 
-        # Add this line in your __init__ method after all other initializations:
-        self._cleanup_duplicate_systems()
-
-        # 🆕 CLASS-SPECIFIC CONFIGURATION
-        self.class_thresholds_config = self._initialize_class_thresholds()
-        
-    def _initialize_class_thresholds(self):
-        """Initialize class-specific threshold configuration"""
-        # Lightweight in-memory config - no file I/O unless needed
-        return {
-            "person_with_helmet_forklift": {"confirmation": 2, "disappearance": 3},
-            "person_with_mask_forklift": {"confirmation": 3, "disappearance": 5},
-            "person_without_mask_helmet_forklift": {"confirmation": 1, "disappearance": 2},
-            "person_without_mask_nonForklift": {"confirmation": 3, "disappearance": 7}
-        }
-    
-    # 🆕 Add method to get thresholds for a class
-    def get_class_thresholds(self, class_name):
-        """Get thresholds for specific class with fallback"""
-        default = {"confirmation": 3, "disappearance": 5}
-        return self.class_thresholds_config.get(class_name, default)
-    
-    # 🆕 Add method to update configuration dynamically
-    def update_class_thresholds(self, class_name, confirmation=None, disappearance=None):
-        """Update thresholds for a specific class"""
-        if class_name not in self.class_thresholds_config:
-            self.class_thresholds_config[class_name] = {"confirmation": 3, "disappearance": 5}
-        
-        if confirmation is not None:
-            self.class_thresholds_config[class_name]["confirmation"] = confirmation
-        if disappearance is not None:
-            self.class_thresholds_config[class_name]["disappearance"] = disappearance
-            
-        # Update existing trackers of this class
-        self._update_existing_trackers(class_name)
-        
-        print(f"✅ Updated thresholds for {class_name}: confirm={confirmation}, disappear={disappearance}")
-    
-    def _update_existing_trackers(self, class_name):
-        """Update thresholds for existing trackers of specified class"""
-        updated_count = 0
-        for tracker in self.object_trackers.values():
-            if tracker.class_name == class_name:
-                thresholds = self.get_class_thresholds(class_name)
-                tracker.confirmation_threshold = thresholds["confirmation"]
-                tracker.disappearance_threshold = thresholds["disappearance"]
-                updated_count += 1
-        
-        if updated_count > 0:
-            print(f"🔄 Updated {updated_count} active trackers for {class_name}")        
-    
+    #   DETECTION PERSISTENCE METHODS
     def enable_detection_persistence(self, persistence_frames=None):
         """
         Enable detection persistence - require N consecutive frames before alerts
@@ -532,177 +479,6 @@ class SelectiveFrameProcessor:
         
         return False, history['consecutive_frames']
 
-    def _initialize_tracking_system(self):
-        """Initialize stateful object tracking for all alert classes"""
-        self.object_trackers = {}
-        self.next_track_id = 1
-        self.tracking_enabled = True
-        print("🎯 Stateful object tracking system initialized")
-
-    def _track_objects(self, results, frame_num):
-        """
-        Stateful object tracking - maintains object identities across frames
-        FIXED: Handle None results properly
-        """
-        if not self.tracking_enabled:
-            # Update all trackers as not detected in this frame
-            for tracker in self.object_trackers.values():
-                state_change, old_state = tracker.update(None, frame_num, detected=False)
-                self._handle_state_change(tracker, state_change, old_state)
-            return
-        
-        current_detections = []
-        
-        # Extract current frame detections
-        if results and results[0].boxes:
-            for box in results[0].boxes:
-                class_id = int(box.cls.item())
-                confidence = box.conf.item()
-                
-                # Only track alert classes
-                if class_id not in self.alert_classes:
-                    continue
-                    
-                class_name = self.alert_classes[class_id]
-                bbox = box.xyxy[0].tolist()
-                
-                current_detections.append({
-                    'bbox': bbox,
-                    'class_name': class_name,
-                    'class_id': class_id,
-                    'confidence': confidence
-                })
-        
-        # Mark all existing trackers as not detected initially
-        detected_tracker_ids = set()
-        
-        # Match detections with existing trackers
-        for detection in current_detections:
-            tracker_id = self._find_tracker_match(detection['bbox'], detection['class_id'])
-            
-            if tracker_id is not None:
-                # Update existing tracker
-                tracker = self.object_trackers[tracker_id]
-                state_change, old_state = tracker.update(detection['bbox'], frame_num, detected=True)
-                detected_tracker_ids.add(tracker_id)
-                self._handle_state_change(tracker, state_change, old_state)
-            else:
-                # Create new tracker for new object
-                self._create_new_tracker(detection, frame_num)
-        
-        # Update trackers that weren't detected in this frame
-        for tracker_id, tracker in self.object_trackers.items():
-            if tracker_id not in detected_tracker_ids:
-                state_change, old_state = tracker.update(None, frame_num, detected=False)
-                self._handle_state_change(tracker, state_change, old_state)
-        
-        # Remove stale trackers
-        self._cleanup_stale_trackers(frame_num)
-        
-        # Debug output (less frequent to reduce console spam)
-        if self.object_trackers and frame_num % 100 == 0:
-            self._print_tracking_status()
-  
-    def _find_tracker_match(self, detection_bbox, class_id, iou_threshold=0.3):
-        """
-        Find best matching tracker using Intersection over Union (IoU)
-        Only matches trackers of the same class
-        """
-        best_tracker_id = None
-        best_iou = iou_threshold
-        
-        for tracker_id, tracker in self.object_trackers.items():
-            # Only match with trackers of the same class
-            if tracker.class_id != class_id:
-                continue
-                
-            iou = self._calculate_iou(tracker.bbox, detection_bbox)
-            if iou > best_iou:
-                best_iou = iou
-                best_tracker_id = tracker_id
-        
-        return best_tracker_id
-
-    def _calculate_iou(self, bbox1, bbox2):
-        """Calculate Intersection over Union between two bounding boxes"""
-        if bbox1 is None or bbox2 is None:
-            return 0
-            
-        x1_1, y1_1, x2_1, y2_1 = bbox1
-        x1_2, y1_2, x2_2, y2_2 = bbox2
-        
-        # Calculate intersection area
-        xi1 = max(x1_1, x1_2)
-        yi1 = max(y1_1, y1_2)
-        xi2 = min(x2_1, x2_2)
-        yi2 = min(y2_1, y2_2)
-        
-        inter_area = max(0, xi2 - xi1) * max(0, yi2 - yi1)
-        
-        # Calculate union area
-        bbox1_area = (x2_1 - x1_1) * (y2_1 - y1_1)
-        bbox2_area = (x2_2 - x1_2) * (y2_2 - y1_2)
-        union_area = bbox1_area + bbox2_area - inter_area
-        
-        return inter_area / union_area if union_area > 0 else 0
-
-    def _create_new_tracker(self, detection, frame_num):
-        """Create a new object tracker"""
-        tracker_id = self.next_track_id
-        self.next_track_id += 1
-        
-        tracker = ObjectTracker(
-            tracker_id, 
-            detection['bbox'], 
-            detection['class_name'], 
-            detection['class_id'], 
-            frame_num
-        )
-        
-        self.object_trackers[tracker_id] = tracker
-        print(f"🎯 New object tracked: ID{tracker_id} - {detection['class_name']}")
-
-    def _cleanup_stale_trackers(self, current_frame_num, stale_threshold=50):
-        """Remove trackers that haven't been updated recently"""
-        stale_ids = []
-        
-        for tracker_id, tracker in self.object_trackers.items():
-            if tracker.is_stale(current_frame_num, stale_threshold):
-                stale_ids.append(tracker_id)
-        
-        for tracker_id in stale_ids:
-            print(f"🧹 Removing stale tracker: ID{tracker_id}")
-            del self.object_trackers[tracker_id]
-
-    def _handle_state_change(self, tracker, state_change, old_state):
-        """Handle object state changes and trigger appropriate actions"""
-        if state_change == "CONFIRMED":
-            print(f"🎯 Object ID{tracker.track_id} ({tracker.class_name}) confirmed - State: {old_state} → {tracker.state}")
-            self._trigger_object_audio_alert(tracker)
-        elif state_change == "DISAPPEARED":
-            print(f"👋 Object ID{tracker.track_id} ({tracker.class_name}) disappeared")
-            # Reset audio trigger for when object reappears
-            tracker.audio_alert_triggered = False
-        elif state_change == "REAPPEARED":
-            print(f"↩️ Object ID{tracker.track_id} ({tracker.class_name}) reappeared - State: {old_state} → {tracker.state}")
-
-    def _trigger_object_audio_alert(self, tracker):
-        """Trigger audio alert based on object state"""
-        if not self.audio_alert_manager:
-            return
-        
-        # Use the object's class name for audio alert
-        self.audio_alert_manager.trigger_alert(tracker.class_name, 0.9)
-
-    def _print_tracking_status(self):
-        """Print current tracking status"""
-        active_objects = sum(1 for t in self.object_trackers.values() if t.state == "PRESENT")
-        print(f"🎯 Tracking {len(self.object_trackers)} objects ({active_objects} active):")
-        
-        for tracker_id, tracker in list(self.object_trackers.items())[:3]:  # Show first 3
-            state_info = tracker.get_state_info()
-            print(f"   ID{tracker_id}: {state_info['class_name']} - {state_info['state']} "
-                  f"(Detections: {state_info['consecutive_detections']}, Misses: {state_info['consecutive_misses']})")
 
     def _cleanup_detection_history(self, current_time, max_age_seconds=10):
         """Remove old entries from detection history using time-based cleanup"""
@@ -716,7 +492,7 @@ class SelectiveFrameProcessor:
         
         for class_id in stale_classes:
             del self.detection_history[class_id]
-            
+
     def set_persistence_frames(self, frames):
         """Dynamically change persistence requirement"""
         self.persistence_frames = max(1, frames)
@@ -868,6 +644,78 @@ class SelectiveFrameProcessor:
             print("Falling back to pretrained YOLO11n model")
             return YOLO("yolo11n.pt")  # Ultimate fallback
 
+    def _track_objects(self, results, frame_num):  
+        """
+        Main object tracking method - matches detections with existing trackers
+        and manages state transitions
+        """
+        if not self.tracking_enabled or not results or not results[0].boxes:
+            return
+        
+        current_detections = []
+        
+        # Extract current frame detections
+        for box in results[0].boxes:
+            class_id = int(box.cls.item())
+            confidence = box.conf.item()
+            
+            # Only track alert classes
+            if class_id not in self.alert_classes:
+                continue
+                
+            class_name = self.alert_classes[class_id]
+            bbox = box.xyxy[0].tolist()
+            
+            current_detections.append({
+                'bbox': bbox,
+                'class_name': class_name,
+                'class_id': class_id,
+                'confidence': confidence
+            })
+        
+        # Match with existing trackers
+        matched_trackers = set()
+        
+        for detection in current_detections:
+            tracker_id = self._find_best_tracker_match(detection['bbox'])
+            
+            if tracker_id is not None:
+                # Update existing tracker
+                tracker = self.object_trackers[tracker_id]  # Updated variable
+                state_changed, new_state, old_state = tracker.update(
+                    detection['bbox'], detection['class_name'], frame_num
+                )
+                
+                if state_changed:
+                    self._handle_state_transition(tracker, old_state, new_state, frame_num)
+                
+                matched_trackers.add(tracker_id)
+            else:
+                # Create new tracker
+                self._create_new_tracker(detection, frame_num)
+        
+        # Remove stale trackers
+        self._cleanup_stale_trackers(frame_num)
+        
+        # Debug: Print current tracking status
+        if self.object_trackers and frame_num % 100 == 0:  # Updated variable
+            print(f"🎯 Tracking {len(self.object_trackers)} objects:")  # Updated message
+            for tracker_id, tracker in list(self.object_trackers.items())[:3]:  # Updated variable
+                print(f"   ID{tracker_id}: {tracker.get_state_summary()}")
+                
+                
+    def _find_best_tracker_match(self, detection_bbox, iou_threshold=0.3):
+        best_tracker_id = None
+        best_iou = iou_threshold
+        
+        for tracker_id, tracker in self.object_trackers.items():  # Updated variable
+            iou = self._calculate_iou(tracker.bbox, detection_bbox)
+            if iou > best_iou:
+                best_iou = iou
+                best_tracker_id = tracker_id
+        
+        return best_tracker_id
+    
     def _calculate_iou(self, bbox1, bbox2):
         """
         Calculate Intersection over Union between two bounding boxes
@@ -890,38 +738,105 @@ class SelectiveFrameProcessor:
         
         return inter_area / union_area if union_area > 0 else 0
 
-    def _get_tracker_info_for_bbox(self, bbox, class_id, iou_threshold=0.3):
+    def _create_new_tracker(self, detection, frame_num):
+        """Create a new object tracker"""
+        tracker_id = self.next_track_id
+        self.next_track_id += 1
+        
+        tracker = ObjectTracker(  # Updated class name
+            tracker_id, 
+            detection['bbox'], 
+            detection['class_name'], 
+            frame_num
+        )
+        
+        self.object_trackers[tracker_id] = tracker  # Updated variable
+        print(f"🎯 New Object tracked: ID{tracker_id} - {detection['class_name']}")  # Updated emoji
+
+    def _cleanup_stale_trackers(self, current_frame_num, stale_threshold=50):
+        """Remove trackers that haven't been updated recently"""
+        stale_ids = []
+        
+        for tracker_id, tracker in self.object_trackers.items():  # Updated variable
+            if tracker.is_stale(current_frame_num, stale_threshold):
+                stale_ids.append(tracker_id)
+        
+        for tracker_id in stale_ids:
+            print(f"🧹 Removing stale tracker: ID{tracker_id}")
+            del self.object_trackers[tracker_id]  # Updated variable
+            
+    def _handle_state_transition(self, tracker, old_state, new_state, frame_num):
+        """
+        Handle state transitions and trigger appropriate actions
+        """
+        print(f"🔄 STATE TRANSITION: Person ID{tracker.track_id} {old_state} → {new_state}")
+        
+        # Log the state transition
+        self._log_state_transition(tracker.track_id, old_state, new_state, frame_num)
+        
+        # Trigger audio alerts based on state transitions
+        if new_state == "CONFIRMED_NO_MASK":
+            self._trigger_state_alert(tracker, "no_mask_confirmed")
+        elif new_state == "COMPLIANT" and old_state == "CONFIRMED_NO_MASK":
+            self._trigger_state_alert(tracker, "mask_compliant")
+
+    def _trigger_state_alert(self, tracker, alert_type):
+        """Trigger audio alerts for state transitions"""
+        if not self.audio_alert_manager:
+            return
+            
+        alert_messages = {
+            "no_mask_confirmed": f"Peringatan: Orang ID{tracker.track_id} tidak pakai masker terkonfirmasi",
+            "mask_compliant": f"Bagus: Orang ID{tracker.track_id} sekarang pakai masker"
+        }
+        
+        # For now, we'll use a generic class name for state alerts
+        # We can enhance this later with proper state-based alert classes
+        self.audio_alert_manager.trigger_alert("state_transition", 0.9)
+        
+        print(f"🔊 State alert: {alert_messages[alert_type]}")
+
+    def _log_state_transition(self, tracker_id, old_state, new_state, frame_num):
+        """Log state transitions to file"""
+        try:
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            log_entry = f"{timestamp},{frame_num},{tracker_id},{old_state},{new_state}\n"
+            
+            # Use a separate log file for state transitions
+            state_log_file = "state_transitions_log.csv"
+            if not os.path.exists(state_log_file):
+                with open(state_log_file, 'w') as f:
+                    f.write("Timestamp,Frame_Number,Tracker_ID,Old_State,New_State\n")
+            
+            with open(state_log_file, 'a') as f:
+                f.write(log_entry)
+                
+        except Exception as e:
+            print(f"State logging error: {e}")
+
+    def _get_tracker_info_for_bbox(self, bbox, iou_threshold=0.3):
         """Get tracker information for a bounding box"""
         best_tracker = None
         best_iou = iou_threshold
         
-        for tracker_id, tracker in self.object_trackers.items():
-            # Only consider trackers of the same class
-            if tracker.class_id != class_id:
-                continue
-                
-            # Handle case where tracker bbox might be None
-            if tracker.bbox is None:
-                continue
-                
+        for tracker_id, tracker in self.object_trackers.items():  # Updated variable
             iou = self._calculate_iou(tracker.bbox, bbox)
             if iou > best_iou:
                 best_iou = iou
                 best_tracker = {
                     'id': tracker_id,
                     'state': tracker.state,
-                    'class_name': tracker.class_name
+                    'summary': tracker.get_state_summary()
                 }
         
-        return best_tracker     
-   
+        return best_tracker
+
+# THE _check_alerts METHOD TO USE TIME-BASED CLEANUP:
     def _check_alerts(self, results, frame_num):
-        """
-        Stateful alert checking using object tracking
-        """
         current_time = time.time()
+        newly_triggered = set()
         
-        # Clear expired alerts from cooldown
+        # Clear expired alerts
         expired_alerts = []
         for class_id, last_alert in self.alert_cooldown.items():
             if current_time - last_alert > self.alert_cooldown_duration:
@@ -931,26 +846,67 @@ class SelectiveFrameProcessor:
             if class_id in self.active_alerts:
                 self.active_alerts.remove(class_id)
         
-        # Use stateful object tracking
-        self._track_objects(results, frame_num)
-        
-        # Log all detections for historical tracking
-        if results and results[0].boxes:
+        if results and len(results) > 0 and results[0].boxes:
+            # Run object tracking before individual frame alerts
+            self._track_objects(results, frame_num)  # Updated method name
+            
+            # FIXED: Use time-based cleanup instead of frame-based
+            self._cleanup_detection_history(current_time)
+            
             for box in results[0].boxes:
                 class_id = int(box.cls.item())
                 confidence = box.conf.item()
                 
+                # Get class name from model names
                 class_name = "unknown"
                 if hasattr(self.model, 'names') and self.model.names:
                     class_name = self.model.names.get(class_id, f"class_{class_id}")
                 else:
                     class_name = f"class_{class_id}"
                 
+                # Log ALL detections (not just alert classes)
                 self._log_detection(class_id, class_name, confidence, frame_num, is_alert=False)
-        
-        # Update active alerts based on current object states
-        self._update_active_alerts()
+                
+                # Check if this class is in our alert classes
+                if class_id in self.alert_classes:
+                    alert_class_name = self.alert_classes[class_id]
+                    
+                    # FIXED: Pass current_time to persistence check
+                    should_alert, persistence_count = self._check_persistence(class_id, frame_num)
+                    
+                    if should_alert:
+                        # Check cooldown for this class
+                        last_alert = self.alert_cooldown.get(class_id, 0)
+                        if current_time - last_alert >= self.alert_cooldown_duration:
+                            # Trigger alert
+                            newly_triggered.add(class_id)
+                            self.alert_cooldown[class_id] = current_time
+                            
+                            # Log the alert with persistence info
+                            self._log_detection(class_id, alert_class_name, confidence, frame_num, is_alert=True)
+                            
+                            print(f"🚨 ALERT: {alert_class_name} (Confidence: {confidence:.2f}, Persistence: {persistence_count}/{self.persistence_frames})")
+                        
+                        # CONDITIONAL AUDIO ALERT TRIGGER
+                        if self.audio_alert_manager and self.audio_alert_url:
+                            # Trigger audio alert in separate thread
+                            self.audio_alert_manager.trigger_alert(alert_class_name, confidence)
+                    else:
+                        # Show persistence progress (less frequent to reduce spam)
+                        if persistence_count == 1 or persistence_count % 5 == 0:
+                            print(f"🔍 Persistence: {alert_class_name} {persistence_count}/{self.persistence_frames} frames")
             
+            # Update active alerts without clearing previous ones
+            self.active_alerts.update(newly_triggered)
+            
+            # Clear alerts that are no longer active (after their cooldown)
+            still_active = set()
+            for class_id in self.active_alerts:
+                last_alert = self.alert_cooldown.get(class_id, 0)
+                if current_time - last_alert < self.alert_cooldown_duration:
+                    still_active.add(class_id)
+            self.active_alerts = still_active
+
     def _run_yolo_detection(self, frame, frame_num):
         """Run YOLO object detection with custom bounding box rendering"""
         try:
@@ -960,10 +916,6 @@ class SelectiveFrameProcessor:
                 conf=self.conf_threshold,
                 verbose=False
             )
-            
-            # 🆕 Add quick debug every 50 frames
-            if frame_num % 50 == 0:
-                self._quick_debug_check(results, frame_num)
             
             # Check for alerts
             self._check_alerts(results, frame_num)
@@ -982,9 +934,9 @@ class SelectiveFrameProcessor:
         except Exception as e:
             print(f"YOLO inference error: {e}")
             return frame, 0
-            
+
     def _add_info_overlay(self, frame, frame_num, processed_count, detections_count):
-        """Add class-specific threshold information to overlay"""
+        """Add informational text overlay to the frame with YOLO-specific info"""
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         source_type = "RTSP" if self.is_rtsp else "Camera"
         
@@ -1010,50 +962,41 @@ class SelectiveFrameProcessor:
         cv.putText(frame, alert_status, (10, 125), 
                   cv.FONT_HERSHEY_SIMPLEX, font_scale, alert_color, thickness)
         
-        # STATE SYSTEM: Stateful tracking information
-        tracking_info = f"Objects Tracked: {len(self.object_trackers)}"
+        # Add alert classes if any are active
+        if self.active_alerts:
+            alert_text = "Alerts: " + ", ".join([self.alert_classes[class_id] for class_id in self.active_alerts])
+            cv.putText(frame, alert_text, (10, 145), 
+                      cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (0, 0, 255), 1)
+        
+        # Update tracking information text
+        tracking_info = f"Objects Tracked: {len(self.object_trackers)}"  # Updated variable
         cv.putText(frame, tracking_info, (10, 200), 
                   cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-
-        # 🆕 ADD CLASS THRESHOLD INFO
-        threshold_info = f"Class Thresholds: {len(self.class_thresholds_config)} configured"
-        cv.putText(frame, threshold_info, (10, 240), 
-                  cv.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)                  
         
-        # Show object states (first 5 active objects)
+        # Show states of tracked objects (first 3)
         y_offset = 215
-        active_count = 0
-        for tracker_id, tracker in list(self.object_trackers.items())[:5]:
-            if tracker.state == "PRESENT":
-                state_info = f"ID{tracker_id}: {tracker.class_name} - {tracker.state}"
-                color = (0, 255, 0)  # Green for present
-                cv.putText(frame, state_info, (10, y_offset), 
+        for i, (tracker_id, tracker) in enumerate(list(self.object_trackers.items())[:3]):  # Updated variable
+            state_info = f"ID{tracker_id}: {tracker.state}"
+            color = (0, 255, 0) if tracker.state == "COMPLIANT" else (0, 0, 255) if tracker.state == "CONFIRMED_NO_MASK" else (255, 255, 255)
+            cv.putText(frame, state_info, (10, y_offset), 
+                      cv.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+            y_offset += 15
+        
+        #   Add persistence information
+        if self.persistence_enabled:
+            persistence_info = f"Persistence: {self.persistence_frames} frames"
+            cv.putText(frame, persistence_info, (10, 260), 
+                      cv.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
+            
+            # Show persistence progress for active detections
+            y_offset = 275
+            for class_id, history in list(self.detection_history.items())[:3]:  # Show first 3
+                class_name = self.alert_classes.get(class_id, f"class_{class_id}")
+                progress = f"{class_name}: {history['count']}/{self.persistence_frames}"
+                color = (0, 255, 0) if history['count'] >= self.persistence_frames else (255, 255, 0)
+                cv.putText(frame, progress, (10, y_offset), 
                           cv.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
                 y_offset += 15
-                active_count += 1
-
-        # Show thresholds for active classes (first 3)
-        y_offset = 255
-        active_classes = set()
-        for tracker in self.object_trackers.values():
-            active_classes.add(tracker.class_name)
-        
-        for class_name in list(active_classes)[:3]:
-            thresholds = self.get_class_thresholds(class_name)
-            threshold_text = f"{class_name}: C{thresholds['confirmation']}/D{thresholds['disappearance']}"
-            cv.putText(frame, threshold_text, (10, y_offset), 
-                      cv.FONT_HERSHEY_SIMPLEX, 0.35, (200, 200, 255), 1)
-            y_offset += 12
-
-        
-        if active_count == 0:
-            inactive_count = sum(1 for t in self.object_trackers.values() if t.state != "PRESENT")
-            if inactive_count > 0:
-                cv.putText(frame, f"{inactive_count} inactive objects", (10, 215), 
-                          cv.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-            else:
-                cv.putText(frame, "No objects tracked", (10, 215), 
-                          cv.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
         
         cv.putText(frame, f"Time: {timestamp}", (10, 160), 
                   cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
@@ -1061,17 +1004,7 @@ class SelectiveFrameProcessor:
                   cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
         cv.putText(frame, "Press ESC to exit", (10, 190), 
                   cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
-
-    def _update_active_alerts(self):
-        """Update active alerts based on object states"""
-        current_alerts = set()
-        
-        for tracker in self.object_trackers.values():
-            if tracker.state == "PRESENT":
-                current_alerts.add(tracker.class_id)
-        
-        self.active_alerts = current_alerts 
-
+  
     def start(self):
         """Start both capture and processing threads"""
         self.running = True
@@ -1093,10 +1026,9 @@ class SelectiveFrameProcessor:
         print(f"  - YOLO Processing: Every {self.processing_interval} seconds")
         print(f"  - Display size: {self.display_width}x{self.display_height}")
         print(f"  - Confidence threshold: {self.conf_threshold}")
-        print(f"  - Stateful Object Tracking: Enabled")
         if self.persistence_enabled:
             print(f"  - Detection Persistence: {self.persistence_frames} frames required")
-            
+        
     def stop(self):
         """Enhanced cleanup"""
         self.running = False
@@ -1152,8 +1084,8 @@ class SelectiveFrameProcessor:
                 self.latest_frame = frame.copy() if frame is not None else None
                 self.frame_counter = frames_captured
                 
-        print(f"Capture thread stopped. Total frames captured: {frames_captured}")      
-   
+        print(f"Capture thread stopped. Total frames captured: {frames_captured}")
+        
     def _reconnect_rtsp(self):
         """Attempt to reconnect to RTSP stream"""
         print("Attempting RTSP reconnection...")
@@ -1252,16 +1184,6 @@ class SelectiveFrameProcessor:
         self.alert_cooldown_duration = max(1, cooldown_seconds)
         print(f"Alert cooldown changed to {self.alert_cooldown_duration} seconds")
     
-    def _get_state_color(self, state):
-        """Get color based on object state"""
-        state_colors = {
-            "APPEARED": (255, 255, 0),    # Yellow - initial detection
-            "PRESENT": (0, 255, 0),       # Green - confirmed present
-            "DISAPPEARING": (255, 165, 0), # Orange - starting to disappear
-            "GONE": (128, 128, 128)       # Gray - disappeared
-        }
-        return state_colors.get(state, (255, 255, 255))
-
     def reload_alert_classes(self, new_alert_classes_path=None):
         """Reload alert classes from configuration file"""
         if new_alert_classes_path:
@@ -1274,7 +1196,9 @@ class SelectiveFrameProcessor:
 
     def _draw_custom_bounding_boxes(self, frame, results):
         """
-        Draw bounding boxes with object tracking states - FIXED VERSION
+        Draw custom bounding boxes with personalized labels and colors
+        NOW ONLY DISPLAYS CLASSES THAT ARE IN ALERT_CLASSES.TXT
+        Returns: annotated frame
         """
         if not results or len(results) == 0 or not results[0].boxes:
             return frame
@@ -1286,33 +1210,30 @@ class SelectiveFrameProcessor:
             class_id = int(box.cls.item())
             confidence = box.conf.item()
             
-            # 🆕 FIX: Display ALL detections, not just alert classes
-            # This ensures bounding boxes are visible for all detected objects
-            if hasattr(self.model, 'names') and self.model.names:
-                class_name = self.model.names.get(class_id, f"class_{class_id}")
-            else:
-                class_name = f"class_{class_id}"
+            # ONLY display if this class is in alert_classes
+            if class_id not in self.alert_classes:
+                continue  # Skip classes not in alert_classes.txt
             
+            # Get original coordinates
             x1, y1, x2, y2 = box.xyxy[0].tolist()
             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
             
-            # 🆕 FIX: Always get display properties, don't filter by alert_classes
-            display_label, box_color, should_display = self._get_bbox_display_properties(class_id, confidence, class_name)
+            # Determine label, color, and whether to display
+            display_label, box_color, should_display = self._get_bbox_display_properties(class_id, confidence)
             
             if should_display:
-                # Find tracker for this detection - only for alert classes
-                tracker_info = None
-                if class_id in self.alert_classes:
-                    tracker_info = self._get_tracker_info_for_bbox([x1, y1, x2, y2], class_id)
+                #   Try to find tracker for this detection and add tracking info
+                tracker_info = self._get_tracker_info_for_bbox([x1, y1, x2, y2])
                 
                 if tracker_info:
-                    # Use tracker state for display
-                    state_color = self._get_state_color(tracker_info['state'])
-                    state_label = f"ID{tracker_info['id']} {tracker_info['state']}"
-                    display_label = f"{state_label} | {display_label}"
-                    box_color = state_color
+                    display_label = f"ID{tracker_info['id']} {tracker_info['state']} | {display_label}"
+                    # Color code by state
+                    if tracker_info['state'] == "CONFIRMED_NO_MASK":
+                        box_color = (0, 0, 255)  # Red for no mask
+                    elif tracker_info['state'] == "COMPLIANT":
+                        box_color = (0, 255, 0)  # Green for compliant
                 
-                # Draw bounding box with state information
+                # Draw bounding box
                 thickness = 2
                 cv.rectangle(annotated_frame, (x1, y1), (x2, y2), box_color, thickness)
                 
@@ -1322,50 +1243,58 @@ class SelectiveFrameProcessor:
                 
                 # Label background rectangle
                 cv.rectangle(annotated_frame, (x1, y1 - label_size[1] - 10), 
-                            (x1 + label_size[0], y1), box_color, -1)
+                             (x1 + label_size[0], y1), box_color, -1)
                 
                 # Label text
                 cv.putText(annotated_frame, label, (x1, y1 - 5), 
-                        cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                           cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                
+                # Additional visual indicators for high-confidence detections
+                if confidence > 0.8:
+                    # Draw corner markers
+                    marker_length = 15
+                    # Top-left corner
+                    cv.line(annotated_frame, (x1, y1), (x1 + marker_length, y1), box_color, 3)
+                    cv.line(annotated_frame, (x1, y1), (x1, y1 + marker_length), box_color, 3)
+                    # Top-right corner  
+                    cv.line(annotated_frame, (x2, y1), (x2 - marker_length, y1), box_color, 3)
+                    cv.line(annotated_frame, (x2, y1), (x2, y1 + marker_length), box_color, 3)
+                    # Bottom-left corner
+                    cv.line(annotated_frame, (x1, y2), (x1 + marker_length, y2), box_color, 3)
+                    cv.line(annotated_frame, (x1, y2), (x1, y2 - marker_length), box_color, 3)
+                    # Bottom-right corner
+                    cv.line(annotated_frame, (x2, y2), (x2 - marker_length, y2), box_color, 3)
+                    cv.line(annotated_frame, (x2, y2), (x2, y2 - marker_length), box_color, 3)
         
-        return frame
-
-    def _get_bbox_display_properties(self, class_id, confidence, class_name=None):
+        return annotated_frame
+    
+    def _get_bbox_display_properties(self, class_id, confidence):
         """
-        Determine display properties for a bounding box - ULTIMATE FIX
-        Now displays ALL detections with minimal filtering
+        Determine display properties for a bounding box based on custom configuration
+        NOW ONLY PROCESSES CLASSES THAT ARE IN ALERT_CLASSES.TXT
         Returns: (label, color, should_display)
         """
-        # Always get class name first
-        if class_name is None:
-            if hasattr(self.model, 'names') and self.model.names:
-                class_name = self.model.names.get(class_id, f"class_{class_id}")
-            else:
-                class_name = f"class_{class_id}"
-        
-        # Only filter by model's confidence threshold
-        if confidence < self.conf_threshold:
+        # Only display if class is in alert_classes
+        if class_id not in self.alert_classes:
             return "", (0, 0, 0), False
         
-        # Check custom bbox config without additional filtering
+        # Check if we have custom configuration for this class
         if class_id in self.bbox_label_map:
             config = self.bbox_label_map[class_id]
-            # Use custom label and color, but don't apply extra confidence filtering
-            return config['label'], config['color'], True
+            # Check confidence threshold
+            if confidence >= config['confidence_threshold']:
+                return config['label'], config['color'], True
+            else:
+                return "", (0, 0, 0), False  # Don't display if below threshold
         
-        # Display ALL classes that pass model confidence
+        # Default behavior - use alert class name and default color
+        alert_class_name = self.alert_classes.get(class_id, f"class_{class_id}")
+        # Use color based on class_id for variety
         colors = [(0, 255, 0), (255, 0, 0), (0, 0, 255), (255, 255, 0), 
-                (255, 0, 255), (0, 255, 255), (128, 0, 128)]
+                 (255, 0, 255), (0, 255, 255), (128, 0, 128)]
         color = colors[class_id % len(colors)]
-        
-        # Use alert class name if available, otherwise use model name
-        if class_id in self.alert_classes:
-            display_name = self.alert_classes[class_id]
-        else:
-            display_name = class_name
-            
-        return display_name, color, True
-            
+        return alert_class_name, color, True
+
     def reload_bbox_labels(self, new_config_path=None):
         """Reload custom bounding box label configuration"""
         if new_config_path:
@@ -1390,53 +1319,28 @@ class SelectiveFrameProcessor:
             print(f"Removed custom bbox label for class {class_id}")
 
 
-    # Add these methods to SelectiveFrameProcessor for interactive control
-    def set_class_threshold(self, class_name, confirmation_threshold, disappearance_threshold):
-        """Set thresholds for a specific class"""
-        self.update_class_thresholds(class_name, confirmation_threshold, disappearance_threshold)
-    
-    def print_class_thresholds(self):
-        """Print current class threshold configuration"""
-        print("🎯 CURRENT CLASS THRESHOLDS:")
-        for class_name, thresholds in self.class_thresholds_config.items():
-            print(f"  {class_name}: confirm={thresholds['confirmation']}, disappear={thresholds['disappearance']}")
-    
-    def reset_class_thresholds(self):
-        """Reset all class thresholds to defaults"""
-        self.class_thresholds_config = self._initialize_class_thresholds()
-        # Update all active trackers
-        for tracker in self.object_trackers.values():
-            thresholds = self.get_class_thresholds(tracker.class_name)
-            tracker.confirmation_threshold = thresholds["confirmation"]
-            tracker.disappearance_threshold = thresholds["disappearance"]
-        print("✅ All class thresholds reset to defaults")
 
-    def _cleanup_duplicate_systems(self):
-        """Clean up duplicate tracking systems"""
-        # Remove old person tracking system if it exists
-        if hasattr(self, 'person_trackers'):
-            delattr(self, 'person_trackers')
-        
-        # Ensure we only have one tracking system
-        if not hasattr(self, 'object_trackers'):
-            self.object_trackers = {}
-            self.next_track_id = 1
 
-def _quick_debug_check(self, results, frame_num):
-    """Lightweight debug to verify detections are working"""
-    if results and results[0].boxes:
-        detections = len(results[0].boxes)
-        print(f"🔍 Frame {frame_num}: {detections} detections found")
+    def print_timing_debug(self):
+        """Debug method to show timing information"""
+        if not self.persistence_enabled:
+            print("🔍 Persistence disabled")
+            return
         
-        # Show first 3 detections
-        for i, box in enumerate(results[0].boxes[:3]):
-            class_id = int(box.cls.item())
-            confidence = box.conf.item()
-            if hasattr(self.model, 'names') and self.model.names:
-                class_name = self.model.names.get(class_id, f"class_{class_id}")
-            else:
-                class_name = f"class_{class_id}"
-            print(f"   Detection {i}: {class_name} (ID:{class_id}) - {confidence:.2f}")
+        print("🔍 Persistence Debug Info:")
+        print(f"  - Processing Interval: {self.processing_interval}s")
+        print(f"  - Required Frames: {self.persistence_frames}")
+        print(f"  - Tracked Classes: {len(self.detection_history)}")
+        
+        for class_id, history in self.detection_history.items():
+            class_name = self.alert_classes.get(class_id, f"class_{class_id}")
+            time_gap = time.time() - history['last_processed_time']
+            max_gap = self.processing_interval * 3
+            print(f"  - {class_name}: {history['consecutive_frames']}/{self.persistence_frames} frames, "
+                f"Time gap: {time_gap:.2f}s (max: {max_gap:.2f}s)")                   
+        
+        return frame
+
 
 def main():
     """
