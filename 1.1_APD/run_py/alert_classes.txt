@@ -21,11 +21,12 @@
 # These classes is for production room
 0:person_with_helmet_forklift
 1:person_with_mask_forklift
+#3: person_with_mask_nonForklift
 4:person_without_mask_helmet_forklift
 5:person_without_mask_nonForklift
 
 # These classes is for detectMe
 #0:person
-1#:glasses
+#1:glasses
 
 
