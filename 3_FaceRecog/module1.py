@@ -1,3 +1,7 @@
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+
+
 import face_recognition
 import cv2
 from multiprocessing import Process, Manager, cpu_count, set_start_method
@@ -12,7 +16,7 @@ from pathlib import Path
 class DynamicFaceEncoder:
     def __init__(self, encodings_file="face_encodings.pkl"):
         self.encodings_file = encodings_file
-        self.known_face_encodings = []
+        self.known_face_encodings = [] # List of known face encodings
         self.known_face_names = []
         self.load_encodings()
     
@@ -70,35 +74,6 @@ class DynamicFaceEncoder:
         except Exception as e:
             print(f"Error adding face from {image_path}: {e}")
             return False
-    
-    def add_face_from_frame(self, frame, name):
-        """Add a new face from a video frame"""
-        try:
-            # Convert BGR to RGB
-            rgb_frame = frame[:, :, ::-1]
-            
-            # Find face encodings
-            face_encodings = face_recognition.face_encodings(rgb_frame)
-            
-            if len(face_encodings) == 0:
-                print(f"No faces found in frame")
-                return False
-            
-            # Use the first face found
-            face_encoding = face_encodings[0]
-            
-            # Add to known faces
-            self.known_face_encodings.append(face_encoding)
-            self.known_face_names.append(name)
-            
-            # Save updated encodings
-            self.save_encodings()
-            print(f"Added face from frame: {name}")
-            return True
-            
-        except Exception as e:
-            print(f"Error adding face from frame: {e}")
-            return False
 
 # Get next worker's id
 def next_id(current_id, worker_num):
@@ -127,10 +102,31 @@ def capture(read_frame_list, Global, worker_num):
     video_capture.release()
 
 # Many subprocess use to process frames.
-def process(worker_id, read_frame_list, write_frame_list, Global, worker_num):
-    face_encoder = Global.face_encoder
+def process(worker_id, read_frame_list, write_frame_list, Global, worker_num, initial_encodings, initial_names):
+    """
+    Worker process with local copies of encodings that get periodically updated
+    """
+    # Start with initial encodings
+    current_encodings = initial_encodings.copy()
+    current_names = initial_names.copy()
+    last_update_time = time.time()
+    update_interval = 1.0  # Check for updates every 1 second
     
     while not Global.is_exit:
+        # Check for updates to encodings periodically
+        if time.time() - last_update_time > update_interval:
+            if hasattr(Global, 'encodings_updated') and Global.encodings_updated:
+                try:
+                    # Try to get updated encodings from shared memory
+                    if hasattr(Global, 'known_face_encodings') and hasattr(Global, 'known_face_names'):
+                        current_encodings = list(Global.known_face_encodings)
+                        current_names = list(Global.known_face_names)
+                        print(f"Worker {worker_id}: Updated to {len(current_names)} known faces")
+                        Global.encodings_updated = False
+                except Exception as e:
+                    print(f"Worker {worker_id}: Error updating encodings: {e}")
+            last_update_time = time.time()
+
         # Wait to read
         while Global.read_num != worker_id or Global.read_num != prev_id(Global.buff_num, worker_num):
             if Global.is_exit:
@@ -144,15 +140,11 @@ def process(worker_id, read_frame_list, write_frame_list, Global, worker_num):
         Global.read_num = next_id(Global.read_num, worker_num)
 
         # Convert the image from BGR color to RGB color
-        rgb_frame = frame_process[:, :, ::-1]
+        rgb_frame = cv2.cvtColor(frame_process, cv2.COLOR_BGR2RGB)
 
         # Find all the faces and face encodings in the frame
         face_locations = face_recognition.face_locations(rgb_frame)
         face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
-
-        # Get current encodings
-        current_encodings = face_encoder.known_face_encodings
-        current_names = face_encoder.known_face_names
 
         # Loop through each face in this frame of video
         for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
@@ -182,6 +174,8 @@ def process(worker_id, read_frame_list, write_frame_list, Global, worker_num):
         # Add frame counter and instructions
         cv2.putText(frame_process, "Press 'a' to add face, 'q' to quit", (10, 30), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        cv2.putText(frame_process, f"Known faces: {len(current_names)}", (10, 60), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
         # Wait to write
         while Global.write_num != worker_id:
@@ -190,28 +184,81 @@ def process(worker_id, read_frame_list, write_frame_list, Global, worker_num):
         write_frame_list[worker_id] = frame_process
         Global.write_num = next_id(Global.write_num, worker_num)
 
+def add_face_from_frame_wrapper(frame, name, face_encoder, Global):
+    """Wrapper function to add face and update shared state"""
+    try:
+        # Convert BGR to RGB and ensure contiguous array
+        rgb_frame = np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        
+        # Find face encodings
+        face_encodings = face_recognition.face_encodings(rgb_frame)
+        
+        if len(face_encodings) == 0:
+            print(f"No faces found in frame")
+            return False
+        
+        # Use the first face found
+        face_encoding = face_encodings[0]
+        
+        # Add to local known faces
+        face_encoder.known_face_encodings.append(face_encoding)
+        face_encoder.known_face_names.append(name)
+        
+        # Update shared lists if they exist
+        if hasattr(Global, 'known_face_encodings') and hasattr(Global, 'known_face_names'):
+            try:
+                Global.known_face_encodings.append(face_encoding)
+                Global.known_face_names.append(name)
+                Global.encodings_updated = True
+                print(f"Updated shared memory with new face: {name}")
+            except Exception as e:
+                print(f"Could not update shared memory: {e}")
+        
+        # Save updated encodings to disk
+        face_encoder.save_encodings()
+        print(f"Added face from frame: {name}")
+        return True
+        
+    except Exception as e:
+        print(f"Error adding face from frame: {e}")
+        return False
+
 if __name__ == '__main__':
-    # Fix Bug on MacOS
-    if platform.system() == 'Darwin':
+    # Windows-specific multiprocessing setup
+    if platform.system() == 'Windows':
+        set_start_method('spawn')  # Use 'spawn' instead of 'fork' on Windows
+    elif platform.system() == 'Darwin':
         set_start_method('forkserver')
 
     # Initialize face encoder
     face_encoder = DynamicFaceEncoder()
 
     # Global variables
-    Global = Manager().Namespace()
+    manager = Manager()
+    Global = manager.Namespace()
     Global.buff_num = 1
     Global.read_num = 1
     Global.write_num = 1
     Global.frame_delay = 0
     Global.is_exit = False
-    Global.face_encoder = face_encoder  # Share the encoder instance
+    Global.encodings_updated = False
     
-    read_frame_list = Manager().dict()
-    write_frame_list = Manager().dict()
+    # Use shared lists for face data (with fallback handling)
+    try:
+        Global.known_face_encodings = manager.list(face_encoder.known_face_encodings)
+        Global.known_face_names = manager.list(face_encoder.known_face_names)
+        print("Shared memory lists created successfully")
+    except Exception as e:
+        print(f"Warning: Could not create shared lists: {e}")
+        # Create dummy attributes to avoid attribute errors
+        Global.known_face_encodings = []
+        Global.known_face_names = []
+    
+    read_frame_list = manager.dict()
+    write_frame_list = manager.dict()
 
-    # Number of workers
-    worker_num = max(2, cpu_count() - 1)
+    # Number of workers - use fewer workers on Windows to reduce complexity
+    worker_num = min(2, cpu_count() - 1)  # Reduced for Windows stability
 
     # Subprocess list
     processes = []
@@ -220,9 +267,13 @@ if __name__ == '__main__':
     processes.append(threading.Thread(target=capture, args=(read_frame_list, Global, worker_num)))
     processes[0].start()
 
-    # Create workers
+    # Create workers with initial encodings
     for worker_id in range(1, worker_num + 1):
-        p = Process(target=process, args=(worker_id, read_frame_list, write_frame_list, Global, worker_num))
+        p = Process(target=process, args=(
+            worker_id, read_frame_list, write_frame_list, Global, worker_num,
+            face_encoder.known_face_encodings.copy(), 
+            face_encoder.known_face_names.copy()
+        ))
         p.start()
         processes.append(p)
 
@@ -240,6 +291,7 @@ if __name__ == '__main__':
     print("Commands:")
     print("- Press 'a' to add a new face")
     print("- Press 'q' to quit")
+    print(f"- Currently loaded {len(face_encoder.known_face_names)} known faces")
     
     while not Global.is_exit:
         while Global.write_num != last_num:
@@ -286,8 +338,11 @@ if __name__ == '__main__':
         elif key == ord('s') and adding_new_face:
             # Save the current frame as a new face
             current_frame = write_frame_list[prev_id(Global.write_num, worker_num)]
-            if face_encoder.add_face_from_frame(current_frame, new_face_name):
+            
+            # Use the wrapper function
+            if add_face_from_frame_wrapper(current_frame, new_face_name, face_encoder, Global):
                 print(f"Successfully added {new_face_name} to known faces!")
+                print("Face should be recognized in the video feed shortly.")
             else:
                 print(f"Failed to add {new_face_name}. Make sure a face is visible.")
             adding_new_face = False
@@ -302,4 +357,10 @@ if __name__ == '__main__':
 
     # Cleanup
     cv2.destroyAllWindows()
+    
+    # Wait for all processes to finish
+    for process in processes:
+        if hasattr(process, 'join'):
+            process.join(timeout=1.0)
+        
     print("System shutdown complete")
