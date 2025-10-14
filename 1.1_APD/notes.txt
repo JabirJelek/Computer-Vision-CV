@@ -1,0 +1,30 @@
+Untuk rtsp link berikut
+
+1. rtsp://admin:ADMIN888@192.168.0.4:554/Streaming/Channels/101
+    dicoba dengan:
+        1. SCMA - 1 = Ok
+        2. SCMA - 3 = X
+        3. SCMA - 5 = X
+
+    Camera: 2, 5, 6, 7, dan 8, tidak responsif.
+
+    apabila disambungkan dengan SCMA - 1, TERKONEKSI.
+
+
+2. rtsp://admin:admin888@192.168.0.3:554/Streaming/Channels/101
+    Camera: 7, 15, 1
+
+https://vps.scasda.my.id/actions/a_notifikasi_suara_speaker.php
+
+    dicoba dengan:
+        1. SCMA - 1 = ok
+        2. SCMA - 3 = X
+        3. SCMA - 5 = X
+
+3. rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/101
+    Cuma sampai 8? akses 9 10 forbidden
+    dicoba dengan:
+        1. SCMA - 1 = Kesalahan password, seharusnya Admin888. bukan admin888. Ketika diganti,
+                        dapat terkoneksi
+        2. SCMA - 3 = X
+        3. SCMA - 5 = X
