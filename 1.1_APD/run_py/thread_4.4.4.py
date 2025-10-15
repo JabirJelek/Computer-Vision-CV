@@ -1,0 +1,1462 @@
+# Python 2/3 compatibility
+from __future__ import print_function
+
+import os
+import sys
+import time
+import threading
+import numpy as np
+import cv2 as cv
+from pathlib import Path
+from ultralytics import YOLO
+import threading
+import queue
+import requests
+import time
+
+import threading
+import queue
+import requests
+import time
+
+
+import threading
+import queue
+import time
+from ultralytics import YOLO
+import cv2
+
+class ByteTrackerThread:
+    """
+    Modified ByteTracker thread that saves detected frames from alert classes and sends to server
+    """
+    def __init__(self, model_config="yolo11n.pt", #tracker_config="bytetrack.yaml", 
+                 conf_threshold=0.5, iou_threshold=0.5, frame_rate=30,
+                 alert_classes=None, save_dir="detected_frames", server_url=None):
+        # Initialize YOLO model with tracking capability
+        self.model = YOLO(model_config)
+        #self.tracker_config = tracker_config
+        self.conf_threshold = conf_threshold
+        self.iou_threshold = iou_threshold
+        self.frame_rate = frame_rate
+        
+        # Alert classes to monitor for saving frames
+        self.alert_classes = alert_classes or []
+        self.save_dir = Path(save_dir)
+        self.server_url = server_url
+        
+        # Create save directory
+        self.save_dir.mkdir(exist_ok=True)
+        
+        # Thread management
+        self.running = False
+        self.thread = None
+        
+        # Use consistent queue naming - only one queue needed
+        self.processing_queue = queue.Queue(maxsize=50)
+        
+        # Tracking state management
+        self.track_history = {}
+        self.active_tracks = set()
+        self.frame_count = 0
+        
+        # Frame saving and sending state
+        self.last_save_time = {}
+        self.min_save_interval = 2.0  # Minimum seconds between saves per track ID
+
+    def start(self):
+        """Start the ByteTracker processing thread"""
+        self.running = True
+        self.thread = threading.Thread(target=self._tracking_loop, name="ByteTrackerThread")
+        self.thread.daemon = True
+        self.thread.start()
+        #print(f"🚀 ByteTracker thread started with {self.tracker_config}")
+        print(f"📸 Alert classes for frame saving: {self.alert_classes}")
+
+    def stop(self):
+        """Stop the tracking thread"""
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=2.0)
+        print("🛑 ByteTracker thread stopped")
+
+    def process_frame(self, frame, frame_num):
+        """Process frame with tracking - non-blocking"""
+        try:
+            data = {
+                'frame': frame.copy(),
+                'frame_num': frame_num,
+                'timestamp': time.time()
+            }
+            self.processing_queue.put(data, block=False)
+            return True
+        except queue.Full:
+            print("⚠️ ByteTracker input queue full - dropping frame")
+            return False
+
+    def get_results(self):
+        """Get latest tracking results"""
+        try:
+            return self.processing_queue.get(block=False)
+        except queue.Empty:
+            return None
+
+    def _tracking_loop(self):
+        """Tracking loop with frame saving for alert classes"""
+        while self.running:
+            try:
+                # Get frame from queue
+                data = self.processing_queue.get(timeout=0.5)
+                frame = data['frame']
+                frame_num = data['frame_num']
+                timestamp = data['timestamp']
+                
+                # Use Ultralytics built-in tracking with ByteTrack
+                results = self.model.track(
+                    source=frame,
+                    conf=self.conf_threshold,
+                    iou=self.iou_threshold,
+                    #tracker=self.tracker_config,
+                    persist=True,
+                    verbose=False
+                )
+                
+                # Process results and check for alert classes
+                tracked_data = self._process_results(results, frame, frame_num, timestamp)
+                
+                if tracked_data:
+                    data.update(tracked_data)
+                
+                self.processing_queue.task_done()
+                
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"❌ Tracking error: {e}")
+
+    def _process_results(self, results, frame, frame_num, timestamp):
+        """Process results and save frames for alert classes"""
+        if not results or len(results) == 0:
+            return None
+            
+        result = results[0]
+        tracked_objects = []
+        alert_detected = False
+        
+        if hasattr(result, 'boxes') and result.boxes is not None:
+            boxes = result.boxes
+            
+            if boxes.id is not None:
+                track_ids = boxes.id.int().cpu().tolist()
+                confidences = boxes.conf.cpu().tolist() if boxes.conf is not None else []
+                class_ids = boxes.cls.int().cpu().tolist() if boxes.cls is not None else []
+                xyxy_boxes = boxes.xyxy.cpu().numpy() if boxes.xyxy is not None else []
+                
+                for i, (track_id, box_xyxy) in enumerate(zip(track_ids, xyxy_boxes)):
+                    confidence = confidences[i] if i < len(confidences) else 0.0
+                    class_id = class_ids[i] if i < len(class_ids) else 0
+                    
+                    # Store object data
+                    obj_data = {
+                        'track_id': int(track_id),
+                        'bbox': box_xyxy.tolist(),
+                        'confidence': float(confidence),
+                        'class_id': int(class_id),
+                        'frame_num': frame_num
+                    }
+                    tracked_objects.append(obj_data)
+                    
+                    # Check if this class is in alert classes and should save frame
+                    if class_id in self.alert_classes:
+                        alert_detected = True
+                        self._handle_alert_frame(frame, class_id, track_id, confidence, timestamp)
+        
+        # Save frame if any alert class detected
+        if alert_detected:
+            self._save_detected_frame(frame, frame_num, timestamp, tracked_objects)
+        
+        return {
+            'tracked_objects': tracked_objects,
+            'frame': frame,
+            'frame_num': frame_num,
+            'success': len(tracked_objects) > 0,
+            'alert_detected': alert_detected
+        }
+
+    def _handle_alert_frame(self, frame, class_id, track_id, confidence, timestamp):
+        """Handle frame with detected alert class"""
+        current_time = time.time()
+        track_key = f"{class_id}_{track_id}"
+        
+        # Check if we should save this frame (rate limiting per track)
+        if track_key in self.last_save_time:
+            time_since_last_save = current_time - self.last_save_time[track_key]
+            if time_since_last_save < self.min_save_interval:
+                return  # Skip saving, too soon
+        
+        # Update last save time
+        self.last_save_time[track_key] = current_time
+        
+        print(f"📸 Alert class {class_id} detected (Track {track_id}, Conf: {confidence:.2f})")
+
+    def _save_detected_frame(self, frame, frame_num, timestamp, tracked_objects):
+        """Save detected frame as PNG and optionally send to server"""
+        try:
+            # Create filename with timestamp and frame number
+            timestamp_str = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"alert_{timestamp_str}_frame{frame_num}.png"
+            filepath = self.save_dir / filename
+            
+            # Save frame as PNG
+            success = cv2.imwrite(str(filepath), frame)
+            
+            if success:
+                print(f"💾 Saved detected frame: {filename}")
+                
+                # Send to server if URL provided
+                if self.server_url:
+                    self._send_to_server(filepath, tracked_objects, frame_num)
+            else:
+                print(f"❌ Failed to save frame: {filename}")
+                
+        except Exception as e:
+            print(f"❌ Error saving detected frame: {e}")
+
+    def _send_to_server(self, filepath, tracked_objects, frame_num):
+        """Send detected image and data to server"""
+        try:
+            if not self.server_url:
+                return
+                
+            # Check if file exists
+            if not filepath.exists():
+                print(f"❌ File not found for sending: {filepath}")
+                return
+            
+            # Prepare data for server
+            detection_data = {
+                'frame_num': frame_num,
+                'timestamp': time.time(),
+                'detections': tracked_objects,
+                'total_detections': len(tracked_objects)
+            }
+            
+            # Send multipart request with image and data
+            with open(filepath, 'rb') as image_file:
+                files = {'image': (filepath.name, image_file, 'image/png')}
+                data = {'detection_data': str(detection_data)}
+                
+                response = requests.post(
+                    self.server_url, 
+                    files=files, 
+                    data=data,
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    print(f"✅ Image sent to server successfully: {filepath.name}")
+                else:
+                    print(f"⚠️ Server returned status {response.status_code} for {filepath.name}")
+                    
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Network error sending to server: {e}")
+        except Exception as e:
+            print(f"❌ Error sending image to server: {e}")
+
+    def set_alert_classes(self, alert_classes):
+        """Update alert classes to monitor"""
+        self.alert_classes = alert_classes
+        print(f"📸 Updated alert classes: {alert_classes}")
+
+    def set_server_url(self, server_url):
+        """Update server URL"""
+        self.server_url = server_url
+        print(f"🌐 Updated server URL: {server_url}")
+
+    def set_save_directory(self, save_dir):
+        """Update save directory"""
+        self.save_dir = Path(save_dir)
+        self.save_dir.mkdir(exist_ok=True)
+        print(f"📁 Updated save directory: {save_dir}")
+    
+class AudioAlertManager:
+    """
+    Manages audio alerts in a separate thread to avoid blocking main processing.
+    """
+    def __init__(self, target_url):
+        self.target_url = target_url
+        self.alert_queue = queue.Queue()
+        self.running = False
+        self.thread = None
+        
+        # Existing gap control
+        self.last_alert_time = 0
+        self.min_alert_gap = 10.0
+        
+        # Alert fatigue prevention
+        self.message_rotations = self._initialize_message_rotations()
+        self.last_message_index = {}
+        
+        self.start()
+    
+    def _initialize_message_rotations(self):
+        """Define message variations to prevent fatigue"""
+        return {
+            "person_with_helmet_forklift": [
+                "Forklift Operator tanpa masker terdeteksi",
+                "Perhatian: Operator forklift tidak pakai masker",
+                "Safety alert: Masker tidak dipakai operator forklift"
+            ],
+            "person_with_mask_forklift": [
+                "Forklift Operator tanpa helm terdeteksi",
+                "Perhatian: Operator forklift lupa helm safety",
+                "Safety alert: Helm safety tidak dipakai operator"
+            ],
+            "person_without_mask_helmet_forklift": [
+                "Forklift Operator tanpa masker dan helm terdeteksi",
+                "Safety alert: Operator forklift tidak pakai masker dan helm",
+                "Peringatan: Masker dan helm tidak digunakan operator"
+            ],
+            "person_without_mask_nonForklift": [
+                "Non forklift operator tanpa masker terdeteksi",
+                "Perhatian: Staff tanpa masker di area umum",
+                "Safety alert: Orang tanpa masker terdeteksi"
+            ]
+        }
+    
+    def start(self):
+        """Start the audio alert processing thread."""
+        self.running = True
+        self.thread = threading.Thread(target=self._process_alerts, name="AudioAlertThread")
+        self.thread.daemon = True  # Daemon thread will exit when main thread exits
+        self.thread.start()
+        print("Audio Alert Manager started.")
+    
+    def trigger_alert(self, class_name, confidence):
+        """Add alert to queue with smart deduplication"""
+        alert_data = {
+            'class_name': class_name,
+            'confidence': confidence,
+            'timestamp': time.time()
+        }
+        
+        # Check if same alert already in queue
+        if not self._is_duplicate_alert(class_name):
+            try:
+                self.alert_queue.put(alert_data, block=False)
+                print(f"🎵 Audio alert queued: {class_name}")
+            except queue.Full:
+                print("⚠️ Alert queue full, dropping alert.")
+
+    def _is_duplicate_alert(self, class_name):
+        """Check if same alert class already queued"""
+        # Simple duplicate prevention - can be enhanced
+        for item in list(self.alert_queue.queue):
+            if item['class_name'] == class_name:
+                return True
+        return False
+    
+    def _process_alerts(self):
+        """Process alerts from the queue with timing control"""
+        while self.running:
+            try:
+                # Add gap control before processing next alert
+                current_time = time.time()
+                time_since_last_alert = current_time - self.last_alert_time
+                
+                if time_since_last_alert < self.min_alert_gap:
+                    # Wait remaining time before next alert
+                    wait_time = self.min_alert_gap - time_since_last_alert
+                    time.sleep(wait_time)
+                
+                alert_data = self.alert_queue.get(timeout=1.0)
+                
+                self._send_audio_alert(alert_data)
+                self.alert_queue.task_done()
+                
+                # Update last alert time after sending
+                self.last_alert_time = time.time()
+                
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"❌ Error processing audio alert: {e}")
+    
+    def _send_audio_alert(self, alert_data):
+        """Send HTTP GET request with rotated messages to prevent fatigue"""
+        try:
+            class_name = alert_data['class_name']
+            confidence = alert_data['confidence']
+            
+            # Get rotated message
+            message = self._get_rotated_message(class_name)
+            
+            # URL encode the message
+            import urllib.parse
+            encoded_message = urllib.parse.quote(message)
+            
+            # Build and send request (existing code)
+            url_with_params = f"{self.target_url}?pesan={encoded_message}"
+            response = requests.get(url_with_params, timeout=5)
+            
+            if response.status_code == 200:
+                print(f"✅ Audio alert sent for {class_name}")
+                print(f"🔊 Custom Message: '{message}'")
+            else:
+                print(f"⚠️ Server returned status {response.status_code}")
+                
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Network error sending audio alert: {e}")
+        except Exception as e:
+            print(f"❌ Unexpected error sending audio alert: {e}")
+    
+    def stop(self):
+        """Stop the alert processing thread - FIXED VERSION"""
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=2.0)
+        print("Audio Alert Manager stopped.")
+        
+    def _get_rotated_message(self, class_name):
+        """Get next message in rotation to prevent fatigue"""
+        # Default message if no rotation defined
+        default_message = f"Peringatan: {class_name} terdeteksi"
+        
+        if class_name not in self.message_rotations:
+            return default_message
+        
+        variations = self.message_rotations[class_name]
+        
+        # Initialize or rotate index
+        if class_name not in self.last_message_index:
+            self.last_message_index[class_name] = 0
+        else:
+            self.last_message_index[class_name] = (self.last_message_index[class_name] + 1) % len(variations)
+        
+        return variations[self.last_message_index[class_name]]
+
+class SelectiveFrameProcessor:
+    """
+    A two-thread system for efficient frame capture with YOLO object detection
+    Now with integrated ByteTracker
+    """
+    
+    def __init__(self, source=0, fps=30, processing_interval=0.5, is_rtsp=False, display_width=640, 
+                model_path="path/to/your/model.pt", 
+                conf_threshold=0.3, alert_classes_path=None, log_file="detection_log.csv",
+                bbox_label_config_path=None, audio_alert_url=None, 
+                enable_tracking=True, #tracker_config="bytetrack.yaml", tracking_model="yolo11n.pt",
+                frame_save_dir="detected_alert_frames", frame_server_url=None):
+        """
+        Args:
+            source: Camera device index (int) or RTSP URL (string)
+            fps: Target frames per second for camera (ignored for RTSP)
+            processing_interval: Time in seconds between processing frames
+            is_rtsp: Boolean indicating if source is an RTSP stream
+            display_width: Width for resizing display frame (maintains aspect ratio)
+            model_path: Path to YOLO model weights (.pt file)
+            conf_threshold: Confidence threshold for YOLO detections
+            alert_classes_path: Path to alert classes configuration file
+            enable_tracking: Boolean to enable/disable ByteTracker
+            tracker_config: Path to ByteTracker configuration file
+            tracking_model: Model to use for tracking (can be different from detection model)
+            frame_save_dir: Directory to save detected alert frames
+            frame_server_url: URL to send detected alert frames
+        """
+        self.source = source
+        self.is_rtsp = is_rtsp
+        self.processing_interval = processing_interval
+        self.display_width = display_width
+        self.conf_threshold = conf_threshold
+        self.enable_tracking = enable_tracking  
+        #self.tracker_config = tracker_config    
+        #self.tracking_model = tracking_model    
+
+        # Initialize logging system
+        self.log_file = log_file
+        self._initialize_logging()
+        
+        # Initialize YOLO model
+        self.model_path = model_path
+        self.model = self._initialize_model()
+        
+        # Initialize alert system
+        self.alert_classes_path = alert_classes_path
+        self.alert_classes = self._initialize_alert_classes()
+        self.alert_cooldown = {}  # Track last alert time per class
+        self.alert_cooldown_duration = 5  # Seconds between alerts for same class
+        self.active_alerts = set()  # Currently triggered alert classes
+        
+        # Initialize capture based on source type
+        if self.is_rtsp:
+            print(f"Initializing RTSP stream: {source}")
+            self.capture = cv.VideoCapture(source)
+            
+            # Set RTSP-specific options for better performance
+            self.capture.set(cv.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer size
+            self.capture.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc(*'H264'))
+        else:
+            print(f"Initializing camera device: {source}")
+            self.capture = cv.VideoCapture(source)
+            self.capture.set(cv.CAP_PROP_FPS, fps)
+        
+        if not self.capture.isOpened():
+            error_msg = f"Could not open {'RTSP stream' if is_rtsp else 'camera'}: {source}"
+            raise RuntimeError(error_msg)
+            
+        # Get video properties
+        self.frame_width = int(self.capture.get(cv.CAP_PROP_FRAME_WIDTH))
+        self.frame_height = int(self.capture.get(cv.CAP_PROP_FRAME_HEIGHT))
+        self.actual_fps = self.capture.get(cv.CAP_PROP_FPS)
+        
+        # Calculate display dimensions maintaining aspect ratio
+        self.display_height = int((self.display_width / self.frame_width) * self.frame_height)
+        
+        print(f"Video properties: {self.frame_width}x{self.frame_height} at {self.actual_fps:.2f} FPS")
+        print(f"Display size: {self.display_width}x{self.display_height}")
+        
+        # Thread synchronization
+        self.lock = threading.Lock()
+        self.latest_frame = None
+        self.frame_counter = 0
+        self.running = False
+        
+        # Threads
+        self.capture_thread = None
+        self.processing_thread = None
+        
+        # Performance monitoring
+        self.capture_failures = 0
+        self.max_capture_failures = 10
+        self.detection_count = 0
+
+        # Initialize custom bounding box labeling system
+        self.bbox_label_config_path = bbox_label_config_path
+        self.bbox_label_map = self._initialize_bbox_labeling()
+        
+        # Initialize the audio alert system
+        self.audio_alert_url = audio_alert_url
+        self.audio_alert_manager = None
+        
+        if self.audio_alert_url:
+            self.audio_alert_manager = AudioAlertManager(self.audio_alert_url)
+            print(f"Audio alerts enabled for URL: {audio_alert_url}")
+
+        # ByteTracker integration parameters 
+        if self.enable_tracking:
+            # Initialize ByteTracker thread with alert classes
+            self.bytetracker = ByteTrackerThread(
+                #model_config=self.tracking_model,
+                #tracker_config=self.tracker_config,
+                conf_threshold=self.conf_threshold,
+                iou_threshold=0.5,
+                frame_rate=30,
+                alert_classes=list(self.alert_classes.keys()) if self.alert_classes else [],
+                save_dir=frame_save_dir,
+                server_url=frame_server_url
+            )
+            self.bytetracker.start()
+            print("✅ ByteTracker integrated with alert frame saving")
+            if frame_server_url:
+                print(f"📡 Frame server URL: {frame_server_url}")
+        else:
+            print("❌ ByteTracker disabled")
+                
+    def _initialize_bbox_labeling(self):
+        """
+        Initialize custom bounding box labeling system
+        Returns: dict with class_id -> {label, color, confidence_threshold}
+        """
+        bbox_label_map = {}
+        
+        if self.bbox_label_config_path and os.path.exists(self.bbox_label_config_path):
+            try:
+                with open(self.bbox_label_config_path, 'r') as f:
+                    for line_num, line in enumerate(f, 1):
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            parts = line.split(':')
+                            if len(parts) == 4:
+                                class_id = int(parts[0].strip())
+                                display_label = parts[1].strip()
+                                color_str = parts[2].strip()
+                                conf_thresh = float(parts[3].strip())
+                                
+                                # Parse BGR color
+                                color_parts = color_str.split(',')
+                                if len(color_parts) == 3:
+                                    color = tuple(int(c) for c in color_parts)
+                                else:
+                                    color = (0, 255, 0)  # Default green
+                                
+                                bbox_label_map[class_id] = {
+                                    'label': display_label,
+                                    'color': color,
+                                    'confidence_threshold': conf_thresh
+                                }
+                                
+                                print(f"Custom bbox: Class {class_id} -> '{display_label}' {color} @ {conf_thresh}")
+                
+                print(f"Loaded {len(bbox_label_map)} custom bounding box labels")
+                
+            except Exception as e:
+                print(f"Error loading bbox label config: {e}")
+                print("Continuing with default bounding box labels")
+        else:
+            if self.bbox_label_config_path:
+                print(f"BBox label config not found: {self.bbox_label_config_path}")
+            print("Using default YOLO bounding box labels")
+        
+        return bbox_label_map        
+        
+    def _initialize_logging(self):
+        """Initialize logging system"""
+        try:
+            # Create log header if file doesn't exist
+            if not os.path.exists(self.log_file):
+                with open(self.log_file, 'w') as f:
+                    f.write("Timestamp,Frame_Number,Class_ID,Class_Name,Confidence,Alert_Triggered\n")
+            print(f"Logging enabled: {self.log_file}")
+        except Exception as e:
+            print(f"Log initialization warning: {e}")
+
+    def _log_detection(self, class_id, class_name, confidence, frame_num, is_alert=False):
+        """Log detection event to file"""
+        try:
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            alert_flag = "YES" if is_alert else "NO"
+            
+            log_entry = f"{timestamp},{frame_num},{class_id},{class_name},{confidence:.3f},{alert_flag}\n"
+            
+            with open(self.log_file, 'a') as f:
+                f.write(log_entry)
+                
+        except Exception as e:
+            print(f"Logging error: {e}")  # Silent fail - don't break main functionality
+                    
+    def _initialize_alert_classes(self):
+        """Initialize alert classes from configuration file"""
+        alert_classes = {}
+        
+        if self.alert_classes_path and os.path.exists(self.alert_classes_path):
+            try:
+                with open(self.alert_classes_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            parts = line.split(':')
+                            if len(parts) == 2:
+                                class_id = int(parts[0].strip())
+                                class_name = parts[1].strip()
+                                alert_classes[class_id] = class_name
+                
+                print(f"Loaded {len(alert_classes)} alert classes from {self.alert_classes_path}")
+                for class_id, class_name in alert_classes.items():
+                    print(f"  - Class {class_id}: {class_name}")
+                    
+            except Exception as e:
+                print(f"Error loading alert classes: {e}")
+                print("Continuing without alert classes")
+        else:
+            print("No alert classes configuration file provided. Alerts disabled.")
+            if self.alert_classes_path:
+                print(f"Alert classes path was: {self.alert_classes_path}")
+        
+        return alert_classes
+    
+    def _initialize_model(self):
+        """Initialize YOLO model with error handling"""
+        try:
+            # Replace this path with your actual model path
+            placeholder_path = Path(self.model_path)
+            
+            if not placeholder_path.exists():
+                print(f"Warning: Model path '{self.model_path}' does not exist.")
+                print("Please update the 'model_path' parameter with your actual model path.")
+                print("For now, using a pretrained YOLO11n model as placeholder.")
+                model = YOLO("yolo11n.pt")  # Fallback to pretrained model:cite[1]
+            else:
+                model = YOLO(self.model_path)  # Load your custom model:cite[1]
+            
+            print(f"YOLO model loaded successfully: {model.__class__.__name__}")
+            return model
+            
+        except Exception as e:
+            print(f"Error loading YOLO model: {e}")
+            print("Falling back to pretrained YOLO11n model")
+            return YOLO("yolo11n.pt")  # Ultimate fallback:cite[1]
+
+    def _check_alerts(self, results, frame_num):
+        current_time = time.time()
+        newly_triggered = set()
+        
+        # Clear expired alerts
+        expired_alerts = []
+        for class_id, last_alert in self.alert_cooldown.items():
+            if current_time - last_alert > self.alert_cooldown_duration:
+                expired_alerts.append(class_id)
+        
+        for class_id in expired_alerts:
+            if class_id in self.active_alerts:
+                self.active_alerts.remove(class_id)
+        
+        if results and len(results) > 0 and results[0].boxes:
+            for box in results[0].boxes:
+                class_id = int(box.cls.item())
+                confidence = box.conf.item()
+                
+                # Get class name from model names
+                class_name = "unknown"
+                if hasattr(self.model, 'names') and self.model.names:
+                    class_name = self.model.names.get(class_id, f"class_{class_id}")
+                else:
+                    class_name = f"class_{class_id}"
+                
+                # Log ALL detections (not just alert classes)
+                self._log_detection(class_id, class_name, confidence, frame_num, is_alert=False)
+                
+                # Check if this class is in our alert classes
+                if class_id in self.alert_classes:
+                    alert_class_name = self.alert_classes[class_id]  # Define it HERE, at the outer level
+                    
+                    # Check cooldown for this class
+                    last_alert = self.alert_cooldown.get(class_id, 0)
+                    if current_time - last_alert >= self.alert_cooldown_duration:
+                        # Trigger alert
+                        newly_triggered.add(class_id)
+                        self.alert_cooldown[class_id] = current_time
+                        
+                        # Log the alert
+                        self._log_detection(class_id, alert_class_name, confidence, frame_num, is_alert=True)
+                        
+                        print(f"🚨 ALERT: {alert_class_name} (Confidence: {confidence:.2f})")
+                    
+                    # CONDITIONAL AUDIO ALERT TRIGGER - NOW alert_class_name IS ALWAYS DEFINED
+                    if self.audio_alert_manager and self.audio_alert_url:
+                        # Trigger audio alert in separate thread
+                        self.audio_alert_manager.trigger_alert(alert_class_name, confidence)
+            
+            # FIX: Update active alerts without clearing previous ones
+            self.active_alerts.update(newly_triggered)
+            
+            # Clear alerts that are no longer active (after their cooldown)
+            still_active = set()
+            for class_id in self.active_alerts:
+                last_alert = self.alert_cooldown.get(class_id, 0)
+                if current_time - last_alert < self.alert_cooldown_duration:
+                    still_active.add(class_id)
+            self.active_alerts = still_active
+
+    def _run_yolo_detection(self, frame, frame_num):
+        """Run YOLO object detection with enhanced error handling"""
+        try:
+            # Validate input frame
+            if frame is None or frame.size == 0:
+                print("Warning: Empty frame passed to YOLO detection")
+                return frame, 0
+                
+            # Run YOLO inference
+            results = self.model.predict(
+                source=frame,
+                conf=self.conf_threshold,
+                verbose=False
+            )
+            
+            # Check for alerts
+            self._check_alerts(results, frame_num)
+            
+            # Process results with custom bounding boxes
+            if results and len(results) > 0:
+                # Use custom bounding box rendering instead of default plot()
+                annotated_frame = self._draw_custom_bounding_boxes(frame, results)
+                
+                detections_count = len(results[0].boxes) if results[0].boxes else 0
+                self.detection_count += detections_count
+                return annotated_frame, detections_count
+            
+            return frame, 0
+            
+        except Exception as e:
+            print(f"YOLO inference error: {e}")
+            # Return original frame on error to prevent crash
+            return frame, 0
+        
+    def _add_info_overlay(self, frame, frame_num, processed_count, detections_count):
+        """Add informational text overlay to the frame with YOLO-specific info"""
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        source_type = "RTSP" if self.is_rtsp else "Camera"
+        
+        # Scale font size based on display width
+        font_scale = 0.5 if self.display_width <= 640 else 0.7
+        thickness = 1 if self.display_width <= 640 else 2
+        
+        # Add different colored text for better visibility
+        cv.putText(frame, f"Source: {source_type}", (10, 25), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 255), thickness)
+        cv.putText(frame, f"Frame: {frame_num}", (10, 45), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0), thickness)
+        cv.putText(frame, f"Processed: {processed_count}", (10, 65), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 0), thickness)
+        cv.putText(frame, f"Detections: {detections_count}", (10, 85), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
+        cv.putText(frame, f"Total Detections: {self.detection_count}", (10, 105), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
+        
+        # Add alert status
+        alert_status = f"Active Alerts: {len(self.active_alerts)}"
+        alert_color = (0, 0, 255) if self.active_alerts else (0, 255, 0)
+        cv.putText(frame, alert_status, (10, 125), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, alert_color, thickness)
+        
+        # Add alert classes if any are active
+        if self.active_alerts:
+            alert_text = "Alerts: " + ", ".join([self.alert_classes[class_id] for class_id in self.active_alerts])
+            cv.putText(frame, alert_text, (10, 145), 
+                      cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (0, 0, 255), 1)
+        
+        cv.putText(frame, f"Time: {timestamp}", (10, 160), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
+        cv.putText(frame, f"Interval: {self.processing_interval}s", (10, 175), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
+        cv.putText(frame, "Press ESC to exit", (10, 190), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
+    
+    def start(self):
+        """Start both capture and processing threads"""
+        self.running = True
+        
+        # Start capture thread
+        self.capture_thread = threading.Thread(target=self._capture_loop, name="CaptureThread")
+        self.capture_thread.daemon = True
+        self.capture_thread.start()
+        
+        # Start processing thread  
+        self.processing_thread = threading.Thread(target=self._processing_loop, name="ProcessingThread")
+        self.processing_thread.daemon = True
+        self.processing_thread.start()
+        
+        source_type = "RTSP stream" if self.is_rtsp else "camera"
+        print(f"Started SelectiveFrameProcessor with YOLO:")
+        print(f"  - Source: {source_type} ({self.source})")
+        print(f"  - Capture: Continuous")
+        print(f"  - YOLO Processing: Every {self.processing_interval} seconds")
+        print(f"  - Display size: {self.display_width}x{self.display_height}")
+        print(f"  - Confidence threshold: {self.conf_threshold}")
+        
+    def stop(self):
+        """Enhanced cleanup"""
+        self.running = False
+        
+        # Proper thread termination
+        if self.capture_thread:
+            self.capture_thread.join(timeout=1.0)
+        if self.processing_thread:
+            self.processing_thread.join(timeout=1.0)
+        
+        # Force cleanup if threads hang
+        if self.capture_thread and self.capture_thread.is_alive():
+            print("Warning: Capture thread did not terminate cleanly")
+        if self.processing_thread and self.processing_thread.is_alive():
+            print("Warning: Processing thread did not terminate cleanly")
+        
+        self.capture.release()
+        cv.destroyAllWindows()
+        print(f"Stopped SelectiveFrameProcessor. Total detections: {self.detection_count}")
+            
+    def _capture_loop(self):
+        """Enhanced capture loop with frame validation"""
+        source_type = "RTSP" if self.is_rtsp else "camera"
+        print(f"Capture thread started - continuously capturing frames from {source_type}")
+        frames_captured = 0
+        self.capture_failures = 0
+        
+        while self.running:
+            ret, frame = self.capture.read()
+            if not ret or frame is None:
+                self.capture_failures += 1
+                print(f"Warning: Failed to capture frame from {source_type} (failure #{self.capture_failures})")
+                
+                # Enhanced reconnection logic
+                if self.is_rtsp and self.capture_failures >= self.max_capture_failures:
+                    print("Multiple RTSP capture failures - attempting enhanced reconnection...")
+                    if self._reconnect_rtsp():
+                        continue  # Successfully reconnected
+                    else:
+                        print("Reconnection failed, continuing with existing connection")
+                        self.capture_failures = 0  # Reset to prevent spam
+                else:
+                    time.sleep(0.1)
+                continue
+                
+            # Reset failure counter on successful capture
+            self.capture_failures = 0
+            frames_captured += 1
+            
+            # Validate frame dimensions
+            if frame.shape[0] <= 0 or frame.shape[1] <= 0:
+                print("Warning: Invalid frame dimensions, skipping...")
+                continue
+            
+            # Store only the latest frame with proper locking
+            with self.lock:
+                self.latest_frame = frame.copy() if frame is not None else None
+                self.frame_counter = frames_captured
+                
+        print(f"Capture thread stopped. Total frames captured: {frames_captured}")
+            
+    def _reconnect_rtsp(self):
+        """Enhanced RTSP reconnection with better error handling"""
+        print("Attempting enhanced RTSP reconnection...")
+        
+        try:
+            # Release old connection
+            if self.capture.isOpened():
+                self.capture.release()
+            
+            # Wait before reconnect
+            time.sleep(2)
+            
+            # Reinitialize with same parameters
+            self.capture = cv.VideoCapture(self.source)
+            self.capture.set(cv.CAP_PROP_BUFFERSIZE, 1)
+            self.capture.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc(*'H264'))
+            
+            # Test the connection
+            if self.capture.isOpened():
+                ret, test_frame = self.capture.read()
+                if ret and test_frame is not None:
+                    print("✅ RTSP reconnection successful")
+                    self.capture_failures = 0
+                    return True
+                else:
+                    print("❌ RTSP reconnected but failed to read frame")
+            else:
+                print("❌ RTSP reconnection failed - cannot open stream")
+                
+        except Exception as e:
+            print(f"❌ RTSP reconnection error: {e}")
+        
+        return False
+
+    def _process_with_tracking(self, tracked_data, frame_num):
+        """Process frames using ByteTracker results with enhanced alert checking"""
+        # Enhanced alert checking with tracking IDs
+        self._check_alerts_with_tracking(tracked_data, frame_num)
+        
+        # Draw tracking enhancements
+        annotated_frame = self._draw_tracking_enhancements(tracked_data)
+        
+        detections_count = len(tracked_data['tracked_objects'])
+        self.detection_count += detections_count
+        
+        return annotated_frame, detections_count
+    
+    def _processing_loop(self):
+        """Optimized processing loop with ByteTracker"""
+        print("Processing thread started with ByteTracker")
+        frames_processed = 0
+        last_processing_time = time.time()
+        
+        while self.running:
+            current_time = time.time()
+            elapsed = current_time - last_processing_time
+            
+            if elapsed >= self.processing_interval:
+                frame_to_process = None
+                frame_num = 0
+                
+                with self.lock:
+                    if self.latest_frame is not None:
+                        frame_to_process = self.latest_frame.copy()
+                        frame_num = self.frame_counter
+                
+                if frame_to_process is not None:
+                    frames_processed += 1
+                    
+                    # Send frame to ByteTracker
+                    self.bytetracker.process_frame(frame_to_process, frame_num)
+                    
+                    # Get tracking results
+                    tracked_data = self.bytetracker.get_results()
+                    
+                    if tracked_data and tracked_data.get('success', False):
+                        # Use tracking results
+                        processed_frame, detections = self._process_tracking_results(tracked_data, frame_num)
+                    else:
+                        # Fallback to original YOLO
+                        processed_frame, detections = self._run_yolo_detection(frame_to_process, frame_num)
+                    
+                    # Display results
+                    if processed_frame is not None:
+                        resized_frame = self._resize_frame(processed_frame)
+                        self._add_info_overlay(resized_frame, frame_num, frames_processed, detections)
+                        
+                        cv2.imshow("YOLO with ByteTracker", resized_frame)
+                        
+                        key = cv2.waitKey(1) & 0xFF
+                        if key == 27:
+                            self.running = False
+                            break
+                
+                last_processing_time = current_time
+                
+            time.sleep(0.001)
+
+    def _process_tracking_results(self, tracked_data, frame_num):
+        """Process tracking results with minimal overhead"""
+        # Enhanced alert checking with tracking
+        self._check_alerts_with_tracking(tracked_data, frame_num)
+        
+        # Draw tracking information on original frame
+        annotated_frame = self._draw_tracking_info(tracked_data)
+        
+        detections_count = len(tracked_data['tracked_objects'])
+        self.detection_count += detections_count
+        
+        return annotated_frame, detections_count
+
+    def _check_alerts_with_tracking(self, tracked_data, frame_num):
+        """Enhanced alert checking with tracking persistence"""
+        current_time = time.time()
+        
+        # Check tracked objects for alerts
+        for obj in tracked_data['tracked_objects']:
+            class_id = obj['class_id']
+            confidence = obj['confidence']
+            track_id = obj['track_id']
+            
+            # Get class name
+            class_name = "unknown"
+            if hasattr(self.model, 'names') and self.model.names:
+                class_name = self.model.names.get(class_id, f"class_{class_id}")
+            
+            # Log detection
+            self._log_detection(class_id, class_name, confidence, frame_num, is_alert=False)
+            
+            # Check alert classes
+            if class_id in self.alert_classes:
+                alert_class_name = self.alert_classes[class_id]
+                
+                # Check cooldown
+                last_alert = self.alert_cooldown.get(class_id, 0)
+                if current_time - last_alert >= self.alert_cooldown_duration:
+                    # Trigger alert
+                    self.alert_cooldown[class_id] = current_time
+                    
+                    # Log alert with track ID
+                    self._log_detection(class_id, f"{alert_class_name}_track{track_id}", 
+                                      confidence, frame_num, is_alert=True)
+                    
+                    print(f"🚨 ALERT: {alert_class_name} (ID:{track_id}, Conf:{confidence:.2f})")
+                
+                # Trigger audio alert
+                if self.audio_alert_manager and self.audio_alert_url:
+                    self.audio_alert_manager.trigger_alert(alert_class_name, confidence)
+
+    def _draw_tracking_info(self, tracked_data):
+        """Minimal tracking visualization """
+        # Check if we have the frame data
+        if 'frame' not in tracked_data:
+            print("❌ ERROR: No frame data in tracked_data!")
+            # Return a black frame or handle appropriately
+            return np.zeros((480, 640, 3), dtype=np.uint8)
+        
+        frame = tracked_data['frame'].copy()
+        
+        # Check if we have objects to draw
+        if 'tracked_objects' not in tracked_data or not tracked_data['tracked_objects']:
+            return frame  # Return original frame if no objects
+        
+        # Draw bounding boxes with track IDs
+        for obj in tracked_data['tracked_objects']:
+            bbox = obj['bbox']
+            track_id = obj['track_id']
+            confidence = obj['confidence']
+            class_id = obj['class_id']
+            
+            x1, y1, x2, y2 = map(int, bbox)
+            
+            # Determine color based on track ID for consistency
+            color = self._get_track_color(track_id)
+            
+            # Draw bounding box
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            
+            # Draw label with track ID
+            label = f"ID:{track_id} {confidence:.2f}"
+            label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
+            
+            # Label background
+            cv2.rectangle(frame, (x1, y1 - label_size[1] - 10),
+                        (x1 + label_size[0], y1), color, -1)
+            
+            # Label text
+            cv2.putText(frame, label, (x1, y1 - 5), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+        
+        return frame
+
+    def _get_track_color(self, track_id):
+        """Get consistent color for track ID"""
+        colors = [
+            (0, 255, 0), (255, 0, 0), (0, 0, 255), 
+            (255, 255, 0), (255, 0, 255), (0, 255, 255),
+            (128, 0, 128), (0, 128, 128), (128, 128, 0)
+        ]
+        return colors[track_id % len(colors)]
+    
+    def _draw_tracking_enhancements(self, tracked_data):
+        """Draw tracking IDs, trails, and enhanced visualizations"""
+        frame = tracked_data['annotated_frame'].copy()
+        
+        # Draw track trails :cite[4]
+        for track_id, trail in tracked_data['track_history'].items():
+            if len(trail) > 1:
+                # Convert points to integer coordinates
+                points = []
+                for point in trail:
+                    x, y = int(point[0]), int(point[1])
+                    points.append((x, y))
+                
+                # Draw movement trail
+                for i in range(1, len(points)):
+                    cv2.line(frame, points[i-1], points[i], (0, 255, 255), 2)
+        
+        # Add tracking information to overlay
+        active_tracks = len(set(obj['track_id'] for obj in tracked_data['tracked_objects'] if obj['track_id'] != -1))
+        cv2.putText(frame, f"Active Tracks: {active_tracks}", 
+                   (10, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+        
+        return frame            
+                          
+    def _resize_frame(self, frame):
+        """Resize frame to display dimensions maintaining aspect ratio"""
+        return cv.resize(frame, (self.display_width, self.display_height))
+     
+    def set_processing_interval(self, interval):
+        """Dynamically change the processing interval"""
+        self.processing_interval = max(0.01, interval)
+        print(f"YOLO processing interval changed to {self.processing_interval} seconds")
+    
+    def set_display_size(self, width):
+        """Dynamically change the display size"""
+        self.display_width = max(160, width)  # Minimum 160px width
+        self.display_height = int((self.display_width / self.frame_width) * self.frame_height)
+        print(f"Display size changed to {self.display_width}x{self.display_height}")
+    
+    def set_confidence_threshold(self, confidence):
+        """Dynamically change YOLO confidence threshold"""
+        self.conf_threshold = max(0.01, min(1.0, confidence))
+        print(f"YOLO confidence threshold changed to {self.conf_threshold}")
+    
+    def get_video_properties(self):
+        """Get current video stream properties"""
+        return {
+            'width': self.frame_width,
+            'height': self.frame_height,
+            'fps': self.actual_fps,
+            'source_type': 'RTSP' if self.is_rtsp else 'Camera',
+            'display_size': f"{self.display_width}x{self.display_height}",
+            'model': str(self.model_path),
+            'confidence_threshold': self.conf_threshold,
+            'total_detections': self.detection_count
+        }
+
+    def set_alert_cooldown(self, cooldown_seconds):
+        """Dynamically change alert cooldown duration"""
+        self.alert_cooldown_duration = max(1, cooldown_seconds)
+        print(f"Alert cooldown changed to {self.alert_cooldown_duration} seconds")
+    
+    def reload_alert_classes(self, new_alert_classes_path=None):
+        """Reload alert classes from configuration file"""
+        if new_alert_classes_path:
+            self.alert_classes_path = new_alert_classes_path
+        
+        self.alert_classes = self._initialize_alert_classes()
+        self.alert_cooldown.clear()
+        self.active_alerts.clear()
+        print("Alert classes reloaded")
+
+    def _draw_custom_bounding_boxes(self, frame, results):
+        """
+        Draw custom bounding boxes with personalized labels and colors
+        NOW ONLY DISPLAYS CLASSES THAT ARE IN ALERT_CLASSES.TXT
+        Returns: annotated frame
+        """
+        if not results or len(results) == 0 or not results[0].boxes:
+            return frame
+        
+        annotated_frame = frame.copy()
+        boxes = results[0].boxes
+        
+        for box in boxes:
+            class_id = int(box.cls.item())
+            confidence = box.conf.item()
+            
+            # ONLY display if this class is in alert_classes
+            if class_id not in self.alert_classes:
+                continue  # Skip classes not in alert_classes.txt
+            
+            # Get original coordinates
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+            
+            # Determine label, color, and whether to display
+            display_label, box_color, should_display = self._get_bbox_display_properties(class_id, confidence)
+            
+            if should_display:
+                # Draw bounding box
+                thickness = 2
+                cv.rectangle(annotated_frame, (x1, y1), (x2, y2), box_color, thickness)
+                
+                # Draw label background
+                label = f"{display_label} {confidence:.2f}"
+                label_size = cv.getTextSize(label, cv.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
+                
+                # Label background rectangle
+                cv.rectangle(annotated_frame, (x1, y1 - label_size[1] - 10), 
+                             (x1 + label_size[0], y1), box_color, -1)
+                
+                # Label text
+                cv.putText(annotated_frame, label, (x1, y1 - 5), 
+                           cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                
+                # Additional visual indicators for high-confidence detections
+                if confidence > 0.8:
+                    # Draw corner markers
+                    marker_length = 15
+                    # Top-left corner
+                    cv.line(annotated_frame, (x1, y1), (x1 + marker_length, y1), box_color, 3)
+                    cv.line(annotated_frame, (x1, y1), (x1, y1 + marker_length), box_color, 3)
+                    # Top-right corner  
+                    cv.line(annotated_frame, (x2, y1), (x2 - marker_length, y1), box_color, 3)
+                    cv.line(annotated_frame, (x2, y1), (x2, y1 + marker_length), box_color, 3)
+                    # Bottom-left corner
+                    cv.line(annotated_frame, (x1, y2), (x1 + marker_length, y2), box_color, 3)
+                    cv.line(annotated_frame, (x1, y2), (x1, y2 - marker_length), box_color, 3)
+                    # Bottom-right corner
+                    cv.line(annotated_frame, (x2, y2), (x2 - marker_length, y2), box_color, 3)
+                    cv.line(annotated_frame, (x2, y2), (x2, y2 - marker_length), box_color, 3)
+        
+        return annotated_frame
+    
+    def _get_bbox_display_properties(self, class_id, confidence):
+        """
+        Determine display properties for a bounding box based on custom configuration
+        NOW ONLY PROCESSES CLASSES THAT ARE IN ALERT_CLASSES.TXT
+        Returns: (label, color, should_display)
+        """
+        # Only display if class is in alert_classes
+        if class_id not in self.alert_classes:
+            return "", (0, 0, 0), False
+        
+        # Check if we have custom configuration for this class
+        if class_id in self.bbox_label_map:
+            config = self.bbox_label_map[class_id]
+            # Check confidence threshold
+            if confidence >= config['confidence_threshold']:
+                return config['label'], config['color'], True
+            else:
+                return "", (0, 0, 0), False  # Don't display if below threshold
+        
+        # Default behavior - use alert class name and default color
+        alert_class_name = self.alert_classes.get(class_id, f"class_{class_id}")
+        # Use color based on class_id for variety
+        colors = [(0, 255, 0), (255, 0, 0), (0, 0, 255), (255, 255, 0), 
+                 (255, 0, 255), (0, 255, 255), (128, 0, 128)]
+        color = colors[class_id % len(colors)]
+        return alert_class_name, color, True
+
+    def reload_bbox_labels(self, new_config_path=None):
+        """Reload custom bounding box label configuration"""
+        if new_config_path:
+            self.bbox_label_config_path = new_config_path
+        
+        self.bbox_label_map = self._initialize_bbox_labeling()
+        print("Bounding box labels reloaded")
+    
+    def add_custom_bbox_label(self, class_id, display_label, color=(0, 255, 0), confidence_threshold=0.5):
+        """Dynamically add a custom bounding box label"""
+        self.bbox_label_map[class_id] = {
+            'label': display_label,
+            'color': color,
+            'confidence_threshold': confidence_threshold
+        }
+        print(f"Added custom bbox: Class {class_id} -> '{display_label}'")
+    
+    def remove_custom_bbox_label(self, class_id):
+        """Remove a custom bounding box label"""
+        if class_id in self.bbox_label_map:
+            del self.bbox_label_map[class_id]
+            print(f"Removed custom bbox label for class {class_id}")
+
+    def _draw_styled_bounding_box(self, frame, x1, y1, x2, y2, label, color, confidence):
+        """Draw bounding box with advanced styling options"""
+        thickness = 3
+        alpha = 0.6  # Transparency for fill
+        
+        # Create overlay for filled rectangle
+        overlay = frame.copy()
+        
+        # Filled rectangle with transparency
+        cv.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+        cv.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+        
+        # Outer border
+        cv.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
+        
+        # Inner border
+        inner_thickness = 1
+        cv.rectangle(frame, (x1 + thickness, y1 + thickness), 
+                     (x2 - thickness, y2 - thickness), (255, 255, 255), inner_thickness)
+        
+        # Label with background
+        label_text = f"{label} {confidence:.2f}"
+        font_scale = 0.6
+        font_thickness = 2
+        
+        label_size = cv.getTextSize(label_text, cv.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)[0]
+        label_y = y1 - 10 if y1 - 10 > 20 else y1 + 20
+        
+        # Label background
+        cv.rectangle(frame, (x1, label_y - label_size[1] - 10),
+                     (x1 + label_size[0] + 10, label_y + 5), color, -1)
+        
+        # Label text
+        cv.putText(frame, label_text, (x1 + 5, label_y), 
+                   cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thickness)
+        
+        return frame
+
+def main():
+    """
+    Demonstration of the SelectiveFrameProcessor with YOLO Object Detection
+    """
+    print("Selective Frame Processing with YOLO Object Detection")
+    print("=" * 60)
+    print("Features:")
+    print("- Camera & RTSP support")
+    print("- Multi-threaded architecture") 
+    print("- Selective frame sampling for CPU efficiency")
+    print("- YOLO object detection integration")
+    print("- Class-based alert system")
+    print("- Resizable display output")
+    print("- Alert class with file input")
+    print("- Logging for alerted classes")        
+    print("- Real-time performance monitoring")
+    print("\nControls:")
+    print("  ESC: Exit")
+    print("=" * 60)
+    
+    # Choose source type
+    while True:
+        choice = input("Choose source type:\n1. Camera\n2. RTSP Stream\nEnter choice (1 or 2): ").strip()
+        
+        if choice == '1':
+            camera_index = int(input("Enter camera index (default 0): ") or "0")
+            display_width = int(input("Enter display width (default 640): ") or "640")
+            processing_interval = float(input("Enter processing interval in seconds (default 0.5): ") or "0.5")
+            model_path = input("Enter YOLO model path (or press Enter for pretrained model): ").strip()
+            alert_classes_path = input("Enter alert classes config file path (or press Enter to skip): ").strip()
+            bbox_label_config_path = input("Enter custom bbox label config file path (or press Enter to skip): ").strip()
+
+            if not bbox_label_config_path:
+                bbox_label_config_path = None
+                print("Using default bounding box labels")
+            else:
+                print(f"Using custom bbox labels from: {bbox_label_config_path}")
+                
+            audio_alert_url = input("Enter audio alert URL (or press Enter to disable): ").strip()
+            if not audio_alert_url:
+                audio_alert_url = None
+                print("Audio alerts disabled")
+            else:
+                print(f"Audio alerts enabled for: {audio_alert_url}")                
+
+            
+            if not model_path:
+                model_path = "yolo11n.pt"
+                print("Using pretrained YOLO11n model")
+            
+            processor = SelectiveFrameProcessor(
+                source=camera_index,
+                fps=30,
+                processing_interval=0.5,
+                is_rtsp=False,
+                display_width=640,
+                model_path=model_path,
+                alert_classes_path=alert_classes_path,
+                bbox_label_config_path=bbox_label_config_path,
+                audio_alert_url=audio_alert_url,
+                enable_tracking=True,
+                #tracker_config="bytetrack.yaml",
+                #tracking_model="yolo11n.pt" 
+            )
+            break
+        
+        elif choice == '2':
+            rtsp_url = input("Enter RTSP URL: ").strip()
+            if not rtsp_url:
+                rtsp_url = "rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4"
+                print(f"Using demo URL: {rtsp_url}")
+            
+            display_width = int(input("Enter display width (default 640): ") or "640")
+            processing_interval = float(input("Enter processing interval in seconds (default 1.0): ") or "1.0")
+            model_path = input("Enter YOLO model path (or press Enter for pretrained model): ").strip()
+            alert_classes_path = input("Enter alert classes config file path (or press Enter to skip): ").strip()
+            bbox_label_config_path = input("Enter custom bbox label config file path (or press Enter to skip): ").strip()
+
+            if not bbox_label_config_path:
+                bbox_label_config_path = None
+                print("Using default bounding box labels")
+            else:
+                print(f"Using custom bbox labels from: {bbox_label_config_path}")
+
+            audio_alert_url = input("Enter audio alert URL (or press Enter to disable): ").strip()
+            if not audio_alert_url:
+                audio_alert_url = None
+                print("Audio alerts disabled")
+            else:
+                print(f"Audio alerts enabled for: {audio_alert_url}")                
+                            
+            if not model_path:
+                model_path = "yolo11n.pt"
+                print("Using pretrained YOLO11n model")
+            
+            processor = SelectiveFrameProcessor(
+                source=rtsp_url,  # Add the source parameter
+                fps=30,
+                processing_interval=processing_interval,  # Use the variable from input
+                is_rtsp=True,  # Set to True for RTSP
+                display_width=display_width,  # Use the variable from input
+                model_path=model_path,
+                alert_classes_path=alert_classes_path,
+                bbox_label_config_path=bbox_label_config_path,
+                audio_alert_url=audio_alert_url,
+                enable_tracking=True,
+                #tracker_config="bytetrack.yaml",
+                #tracking_model="yolo11n.pt"  
+            )
+            break
+        else:
+            print("Invalid choice. Please enter 1 or 2.")
+    
+    try:
+        processor.start()
+        
+        # Keep main thread alive while threads run
+        while processor.running:
+            time.sleep(0.1)
+            
+    except KeyboardInterrupt:
+        print("\n🛑 Keyboard interrupt received - initiating graceful shutdown...")
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}")
+        print("Initiating emergency shutdown...")
+    finally:
+        print("Cleaning up resources...")
+        processor.stop()
+
+
+if __name__ == '__main__':
+    main()
