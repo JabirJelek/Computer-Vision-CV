@@ -12,9 +12,11 @@ Untuk rtsp link berikut
 
 
 2. rtsp://admin:admin888@192.168.0.3:554/Streaming/Channels/101
+https://vps.scasda.my.id//actions/foto_pusat_data_unggah.php
+https://vps.scasda.my.id/actions/a_notifikasi_suara_speaker.php
+
     Camera: 7, 15, 1
 
-https://vps.scasda.my.id/actions/a_notifikasi_suara_speaker.php
 
     dicoba dengan:
         1. SCMA - 1 = ok

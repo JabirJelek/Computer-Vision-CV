@@ -5,6 +5,8 @@ import os
 import time
 import threading
 import cv2 as cv
+import numpy as np
+import urllib.parse
 from pathlib import Path
 from ultralytics import YOLO
 import queue
@@ -13,19 +15,26 @@ import time
 from ultralytics import YOLO
 import cv2
 
-
+custom_server_token = "5baa956d9f094b98be41839de26a75c5"  # Replace with your actual token
+custom_server_id = "6"        # Replace with your actual ID
 model_path="path/to/your/model.pt",
 
 class SavingDetectionThread:
     """
     Pure storage thread - receives annotated frames from main processor and saves them
-    No independent detection - just handles saving and optional server upload
+    Now with smart custom server upload controls
     """
-    def __init__(self, save_dir="detected_frames", server_url=None, min_save_interval=2.0):
+    def __init__(self, save_dir="detected_frames", server_url=None, custom_server_url=None, 
+                 min_save_interval=2.0, custom_server_min_interval=30.0,
+                 custom_server_token=None, custom_server_id=None):
         # Storage configuration
         self.save_dir = Path(save_dir)
         self.server_url = server_url
+        self.custom_server_url = custom_server_url
         self.min_save_interval = min_save_interval
+        self.custom_server_min_interval = custom_server_min_interval
+        self.custom_server_token = custom_server_token  # NEW: Store token
+        self.custom_server_id = custom_server_id        # NEW: Store ID
         
         # Create save directory
         self.save_dir.mkdir(exist_ok=True)
@@ -37,9 +46,21 @@ class SavingDetectionThread:
         
         # Rate limiting per class
         self.last_save_time = {}
+        self.last_custom_server_upload_time = {}
+        
+        # Frame deduplication
+        self.last_uploaded_frame_hash = None
+        self.consecutive_alert_count = 0
+        self.last_alert_time = 0
         
         print(f"💾 SavingDetectionThread initialized - Save dir: {save_dir}")
+        if self.custom_server_url:
+            print(f"🔗 Custom server upload enabled: {custom_server_url}")
+            print(f"⏰ Custom server cooldown: {custom_server_min_interval}s")
+            if self.custom_server_token and self.custom_server_id:
+                print(f"🔑 Using token: {self.custom_server_token}, ID: {self.custom_server_id}")
 
+    # ADDED: Missing methods for thread management
     def start(self):
         """Start the saving processing thread"""
         self.running = True
@@ -58,12 +79,6 @@ class SavingDetectionThread:
     def save_frame(self, frame, frame_num, timestamp, detected_objects, alert_classes):
         """
         Queue a frame for saving - called by main processor
-        Args:
-            frame: Already annotated frame with bounding boxes and overlays
-            frame_num: Frame number for identification
-            timestamp: Detection timestamp
-            detected_objects: List of detected objects with metadata
-            alert_classes: Which classes triggered this save
         """
         try:
             data = {
@@ -83,11 +98,9 @@ class SavingDetectionThread:
         """Process saving requests from queue"""
         while self.running:
             try:
-                # Get save request from queue
                 data = self.save_queue.get(timeout=0.5)
                 self._process_save_request(data)
                 self.save_queue.task_done()
-                
             except queue.Empty:
                 continue
             except Exception as e:
@@ -108,7 +121,6 @@ class SavingDetectionThread:
         for class_id in alert_classes:
             class_key = f"class_{class_id}"
             
-            # Check if enough time has passed since last save for this class
             if class_key not in self.last_save_time:
                 should_save = True
                 break
@@ -128,7 +140,7 @@ class SavingDetectionThread:
         self._save_detected_frame(frame, frame_num, timestamp, detected_objects, alert_classes)
 
     def _save_detected_frame(self, frame, frame_num, timestamp, detected_objects, alert_classes):
-        """Save the annotated frame with proper metadata"""
+        """Save the annotated frame with proper metadata and smart server uploads"""
         try:
             # Create filename with timestamp and alert classes
             timestamp_str = time.strftime("%Y%m%d_%H%M%S")
@@ -136,7 +148,6 @@ class SavingDetectionThread:
             # Get class names for filename
             class_names = []
             for class_id in alert_classes:
-                # Use the alert class mapping or fallback to class_id
                 class_name = f"class_{class_id}"
                 class_names.append(class_name.replace(" ", "_"))
             
@@ -150,15 +161,23 @@ class SavingDetectionThread:
             if success:
                 print(f"💾 Saved detected frame: {filename}")
                 
-                # Optional: Send to server if URL provided
+                # Always send to original server if configured (existing behavior)
                 if self.server_url:
                     self._send_to_server(filepath, detected_objects, frame_num, alert_classes)
+                
+                # SMART: Send to custom server only if criteria are met
+                if self.custom_server_url:
+                    should_upload = self._should_upload_to_custom_server(
+                        frame, filepath, detected_objects, frame_num, alert_classes
+                    )
+                    if should_upload:
+                        self._send_to_custom_server(filepath, detected_objects, frame_num, alert_classes)
             else:
                 print(f"❌ Failed to save frame: {filename}")
                 
         except Exception as e:
             print(f"❌ Error saving detected frame: {e}")
-
+            
     def _send_to_server(self, filepath, detected_objects, frame_num, alert_classes):
         """Send detected image and data to server (optional)"""
         try:
@@ -198,16 +217,169 @@ class SavingDetectionThread:
         except Exception as e:
             print(f"❌ Error sending image to server: {e}")
 
+    def _should_upload_to_custom_server(self, frame, filepath, detected_objects, frame_num, alert_classes):
+        """
+        Smart decision making for custom server uploads
+        Returns True only if upload should proceed based on multiple criteria
+        """
+        current_time = time.time()
+        
+        # Criterion 1: Longer cooldown per alert class
+        should_upload_by_cooldown = False
+        for class_id in alert_classes:
+            class_key = f"class_{class_id}"
+            
+            # Check if enough time has passed since last custom server upload for this class
+            if class_key not in self.last_custom_server_upload_time:
+                should_upload_by_cooldown = True
+                break
+            elif current_time - self.last_custom_server_upload_time[class_key] >= self.custom_server_min_interval:
+                should_upload_by_cooldown = True
+                break
+        
+        if not should_upload_by_cooldown:
+            return False
+        
+        # Criterion 2: Frame similarity/deduplication
+        current_frame_hash = self._compute_frame_hash(frame)
+        if self.last_uploaded_frame_hash is not None:
+            similarity = self._compare_frame_hashes(self.last_uploaded_frame_hash, current_frame_hash)
+            if similarity > 0.95:  # 95% similar - too similar to upload
+                print(f"🔄 Frame too similar to last upload ({similarity:.2%}), skipping custom server")
+                return False
+        
+        # Criterion 3: Consecutive alert sequence (bonus criteria)
+        time_since_last_alert = current_time - self.last_alert_time
+        if time_since_last_alert < 5.0:  # Alerts within 5 seconds are considered consecutive
+            self.consecutive_alert_count += 1
+        else:
+            self.consecutive_alert_count = 1
+        
+        self.last_alert_time = current_time
+        
+        # Only upload if we have multiple consecutive alerts OR it passes all other criteria
+        if self.consecutive_alert_count >= 2:  # Upload on 2nd consecutive alert
+            print(f"🔢 Consecutive alert #{self.consecutive_alert_count}, proceeding with upload")
+            return True
+        elif should_upload_by_cooldown:  # Or if cooldown period has passed
+            return True
+        
+        return False
+
+    def _compute_frame_hash(self, frame):
+        """Compute a simple hash of the frame for similarity comparison"""
+        try:
+            # Resize to smaller dimensions for faster processing
+            small_frame = cv2.resize(frame, (64, 64))
+            # Convert to grayscale
+            gray_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
+            # Compute simple hash (average intensity)
+            return np.mean(gray_frame)
+        except Exception as e:
+            print(f"❌ Error computing frame hash: {e}")
+            return 0
+
+    def _compare_frame_hashes(self, hash1, hash2):
+        """Compare two frame hashes and return similarity (0.0 to 1.0)"""
+        try:
+            # Simple similarity based on intensity difference
+            diff = abs(hash1 - hash2)
+            max_possible_diff = 255  # Maximum difference for grayscale
+            similarity = 1.0 - (diff / max_possible_diff)
+            return max(0.0, min(1.0, similarity))
+        except Exception as e:
+            print(f"❌ Error comparing frame hashes: {e}")
+            return 0.0
+
+    def _send_to_custom_server(self, filepath, detected_objects, frame_num, alert_classes):
+        """Send detected image to custom server endpoint - CORRECTED VERSION"""
+        try:
+            if not self.custom_server_url:
+                return
+        
+            if not filepath.exists():
+                print(f"❌ File not found for custom server: {filepath}")
+                return
+    
+            current_time = time.time()
+    
+            # Read the image file and encode as base64
+            with open(filepath, 'rb') as image_file:
+                image_data = image_file.read()
+            import base64
+            image_base64 = base64.b64encode(image_data).decode('utf-8')
+    
+            # PREPARE FORM DATA WITH CORRECT FIELD NAMES AND ALL REQUIRED FIELDS
+            data = {
+                'token_pengguna': self.custom_server_token,
+                'id_kategori_pusat_data': '6',
+                'id_sub_kategori_pusat_data': self.custom_server_id,
+                'nc': str(int(current_time * 1000)),
+                'media2[]': image_base64,  # ✅ CORRECTED: media2[] instead of media20
+                'first_date': time.strftime("%Y-%m-%d %H:%M:%S"),  # ✅ ADDED: Required field
+                'url': f'https://www.vps.scasda.my.id//v2/#pusat_data&data_master=60{self.custom_server_token}{self.custom_server_id}'  # ✅ ADDED: Required field
+            }
+    
+            print(f"🔍 DEBUG - Sending corrected form data")
+            print(f"🔍   URL: {self.custom_server_url}")
+            print(f"🔍   Token: {self.custom_server_token}")
+            print(f"🔍   ID: {self.custom_server_id}")
+            print(f"🔍   First Date: {data['first_date']}")
+            print(f"🔍   URL Param: {data['url']}")
+            print(f"🔍   Image size: {len(image_data)} bytes")
+            print(f"🔍   Base64 length: {len(image_base64)} chars")
+            print(f"🔍   Field name: media2[]")
+    
+            # Send as regular form data
+            response = requests.post(
+                self.custom_server_url, 
+                data=data,
+                timeout=30  # Increased timeout for debugging
+            )
+    
+            print(f"🔍 DEBUG - Server response status: {response.status_code}")
+            print(f"🔍 DEBUG - Server response headers: {response.headers}")
+            print(f"🔍 DEBUG - Server response content: {response.text}")
+    
+            if response.status_code == 200:
+                print(f"✅ Image successfully sent to custom server: {filepath.name}")
+            
+                # Update tracking after successful upload
+                self.last_uploaded_frame_hash = self._compute_frame_hash(
+                    cv2.imread(str(filepath))
+                )
+                for class_id in alert_classes:
+                    class_key = f"class_{class_id}"
+                    self.last_custom_server_upload_time[class_key] = current_time
+        
+            else:
+                print(f"⚠️ Custom server returned status {response.status_code}: {response.text}")
+        
+        except Exception as e:
+            print(f"❌ Error sending image to custom server: {e}")
+            import traceback
+            traceback.print_exc()
+
     def set_server_url(self, server_url):
         """Update server URL"""
         self.server_url = server_url
         print(f"🌐 Updated server URL: {server_url}")
+
+    def set_custom_server_url(self, custom_server_url):
+        """Update custom server URL"""
+        self.custom_server_url = custom_server_url
+        print(f"🔗 Updated custom server URL: {custom_server_url}")
 
     def set_save_directory(self, save_dir):
         """Update save directory"""
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(exist_ok=True)
         print(f"📁 Updated save directory: {save_dir}")
+
+    def set_custom_server_interval(self, interval):
+        """Update custom server upload interval"""
+        self.custom_server_min_interval = max(1.0, interval)
+        print(f"⏰ Updated custom server upload interval: {interval}s")
 
 class AudioAlertManager:
     """
@@ -249,7 +421,7 @@ class AudioAlertManager:
             ],
             "person_without_mask_nonForklift": [
                 "Non forklift operator tanpa masker terdeteksi",
-                "Perhatian: Staff tanpa masker di area umum",
+                "Perhatian: Staff tanpa masker di area produksi",
                 "Safety alert: Orang tanpa masker terdeteksi"
             ]
         }
@@ -376,7 +548,9 @@ class SelectiveFrameProcessor:
                 conf_threshold=0.3, alert_classes_path=None, log_file="detection_log.csv",
                 bbox_label_config_path=None, audio_alert_url=None, 
                 enable_frame_saving=True, 
-                frame_save_dir="detected_alert_frames", frame_server_url=None):
+                frame_save_dir="detected_alert_frames", frame_server_url=None,
+                custom_server_url=None, custom_server_interval=30.0,
+                custom_server_token=None, custom_server_id=None): 
         """
         Args:
             source: Camera device index (int) or RTSP URL (string)
@@ -468,17 +642,32 @@ class SelectiveFrameProcessor:
             self.audio_alert_manager = AudioAlertManager(self.audio_alert_url)
             print(f"Audio alerts enabled for URL: {audio_alert_url}")
 
-        # Modified SavingDetection integration
+        # Modified SavingDetection integration with smart custom server controls
         if self.enable_frame_saving:
-            # Initialize as pure storage thread
             self.saving_detector = SavingDetectionThread(
                 save_dir=frame_save_dir,
-                server_url=frame_server_url
+                server_url=frame_server_url,
+                custom_server_url=custom_server_url,
+                custom_server_min_interval=custom_server_interval,
+                custom_server_token=custom_server_token,  # NEW: Pass token
+                custom_server_id=custom_server_id         # NEW: Pass ID
             )
             self.saving_detector.start()
             print("✅ SavingDetection integrated as storage service")
+            if custom_server_url:
+                print(f"🔗 Custom server upload enabled: {custom_server_url}")
+                print(f"⏰ Custom server upload interval: {custom_server_interval}s")
+                if custom_server_token and custom_server_id:
+                    print(f"🔑 Using token: {custom_server_token}, ID: {custom_server_id}")
         else:
             self.saving_detector = None
+
+    # Add this method to the SelectiveFrameProcessor class
+    def set_custom_server_upload_interval(self, interval):
+        """Dynamically change custom server upload interval"""
+        if self.saving_detector:
+            self.saving_detector.set_custom_server_interval(interval)
+        print(f"⏰ Custom server upload interval changed to {interval} seconds")
                 
     def _initialize_bbox_labeling(self):
         """
@@ -1106,12 +1295,16 @@ def main():
     print("- Alert class with file input")
     print("- Logging for alerted classes")        
     print("- Real-time performance monitoring")
+    print("- Custom server upload with media2[] parameter and smart deduplication")
     print("\nControls:")
     print("  ESC: Exit")
     print("=" * 60)
+
+
     
     # Choose source type
     while True:
+
         choice = input("Choose source type:\n1. Camera\n2. RTSP Stream\nEnter choice (1 or 2): ").strip()
         
         if choice == '1':
@@ -1133,23 +1326,53 @@ def main():
                 audio_alert_url = None
                 print("Audio alerts disabled")
             else:
-                print(f"Audio alerts enabled for: {audio_alert_url}")                
+                print(f"Audio alerts enabled for: {audio_alert_url}")
 
+            # FIXED: Ask for custom server URL FIRST
+            custom_server_url = input("Enter custom server URL for media2[] upload (or press Enter to disable): ").strip()
+            if not custom_server_url:
+                custom_server_url = None
+                print("Custom server upload disabled")
+            else:
+                print(f"Custom server upload enabled: {custom_server_url}")
+        
+                if not custom_server_token or not custom_server_id:
+                    print("⚠️ Warning: Token and ID are required for custom server upload")
+                    use_custom_server = input("Continue without token and ID? (y/n): ").strip().lower()
+                    if use_custom_server != 'y':
+                        custom_server_url = None
+                        print("Custom server upload disabled due to missing credentials")
+                    else:
+                        print("⚠️ Proceeding without token and ID - server may reject requests")
+
+                # FIXED: Only ask for interval if custom server is enabled
+                custom_server_interval = 30.0  # Default value
+                try:
+                    interval_input = input("Enter custom server upload interval in seconds (default 30.0): ").strip()
+                    if interval_input:
+                        custom_server_interval = float(interval_input)
+                    print(f"Custom server upload interval set to: {custom_server_interval}s")
+                except ValueError:
+                    print("Invalid interval, using default 30.0 seconds")
             
             if not model_path:
                 model_path = "yolo11n.pt"
                 print("Using pretrained YOLO11n model")
             
             processor = SelectiveFrameProcessor(
-                source=camera_index,
+                source=camera_index,  
                 fps=30,
-                processing_interval=0.5,
-                is_rtsp=False,
-                display_width=640,
+                processing_interval=processing_interval,
+                is_rtsp=False,  
+                display_width=display_width,
                 model_path=model_path,
                 alert_classes_path=alert_classes_path,
                 bbox_label_config_path=bbox_label_config_path,
                 audio_alert_url=audio_alert_url,
+                custom_server_url=custom_server_url,
+                #custom_server_interval=custom_server_interval,
+                custom_server_token=custom_server_token,  # NEW: Pass token
+                custom_server_id=custom_server_id         # NEW: Pass ID
             )
             break
         
@@ -1176,22 +1399,53 @@ def main():
                 audio_alert_url = None
                 print("Audio alerts disabled")
             else:
-                print(f"Audio alerts enabled for: {audio_alert_url}")                
+                print(f"Audio alerts enabled for: {audio_alert_url}")
+            
+            # FIXED: Ask for custom server URL FIRST
+            custom_server_url = input("Enter custom server URL for media2[] upload (or press Enter to disable): ").strip()
+            if not custom_server_url:
+                custom_server_url = None
+                print("Custom server upload disabled")
+            else:
+                print(f"Custom server upload enabled: {custom_server_url}")
+        
+                if not custom_server_token or not custom_server_id:
+                    print("⚠️ Warning: Token and ID are required for custom server upload")
+                    use_custom_server = input("Continue without token and ID? (y/n): ").strip().lower()
+                    if use_custom_server != 'y':
+                        custom_server_url = None
+                        print("Custom server upload disabled due to missing credentials")
+                    else:
+                        print("⚠️ Proceeding without token and ID - server may reject requests")
+
+                # FIXED: Only ask for interval if custom server is enabled
+                custom_server_interval = 30.0  # Default value
+                try:
+                    interval_input = input("Enter custom server upload interval in seconds (default 30.0): ").strip()
+                    if interval_input:
+                        custom_server_interval = float(interval_input)
+                    print(f"Custom server upload interval set to: {custom_server_interval}s")
+                except ValueError:
+                    print("Invalid interval, using default 30.0 seconds")
                             
             if not model_path:
                 model_path = "yolo11n.pt"
                 print("Using pretrained YOLO11n model")
             
             processor = SelectiveFrameProcessor(
-                source=rtsp_url,  # Add the source parameter
+                source=rtsp_url,  
                 fps=30,
-                processing_interval=processing_interval,  # Use the variable from input
-                is_rtsp=True,  # Set to True for RTSP
-                display_width=display_width,  # Use the variable from input
+                processing_interval=processing_interval,
+                is_rtsp=False,  
+                display_width=display_width,
                 model_path=model_path,
                 alert_classes_path=alert_classes_path,
                 bbox_label_config_path=bbox_label_config_path,
                 audio_alert_url=audio_alert_url,
+                custom_server_url=custom_server_url,
+                #custom_server_interval=custom_server_interval,
+                custom_server_token=custom_server_token,  # NEW: Pass token
+                custom_server_id=custom_server_id         # NEW: Pass ID
             )
             break
         else:
@@ -1212,7 +1466,6 @@ def main():
     finally:
         print("Cleaning up resources...")
         processor.stop()
-
 
 if __name__ == '__main__':
     main()
