@@ -1,556 +1,698 @@
+# Add these imports at the top
+
 # Python 2/3 compatibility
 from __future__ import print_function
-
 import os
+import sys
 import time
 import threading
-import cv2 as cv
 import numpy as np
-import urllib.parse
+import cv2 as cv
 from pathlib import Path
 from ultralytics import YOLO
-import queue
-import requests
-import time
-from ultralytics import YOLO
-import cv2
+from deepface import DeepFace
+import pandas as pd
+from datetime import datetime
+import json
 
-custom_server_token = "5baa956d9f094b98be41839de26a75c5"  # Replace with your actual token
-custom_server_id = "6"        # Replace with your actual ID
-model_path="path/to/your/model.pt",
-
-class SavingDetectionThread:
-    """
-    Pure storage thread - receives annotated frames from main processor and saves them
-    Now with smart custom server upload controls
-    """
-    def __init__(self, save_dir="detected_frames", server_url=None, custom_server_url=None, 
-                 min_save_interval=2.0, custom_server_min_interval=30.0,
-                 custom_server_token=None, custom_server_id=None):
-        # Storage configuration
-        self.save_dir = Path(save_dir)
-        self.server_url = server_url
-        self.custom_server_url = custom_server_url
-        self.min_save_interval = min_save_interval
-        self.custom_server_min_interval = custom_server_min_interval
-        self.custom_server_token = custom_server_token  # NEW: Store token
-        self.custom_server_id = custom_server_id        # NEW: Store ID
+class FaceRecognitionProcessor:
+    def __init__(self, selective_processor, database_path="face_database", 
+                 recognition_interval=2.0, similarity_threshold=0.6,
+                 model_name="Facenet", distance_metric="cosine"):
+        """
+        Args:
+            selective_processor: Instance of SelectiveFrameProcessor
+            database_path: Path to local face database
+            recognition_interval: Time between face recognition attempts
+            similarity_threshold: Minimum similarity score for positive recognition
+            model_name: DeepFace model name (VGG-Face, Facenet, ArcFace, etc.)
+            distance_metric: cosine, euclidean, or euclidean_l2
+        """
+        self.selective_processor = selective_processor
+        self.database_path = Path(database_path)
+        self.recognition_interval = recognition_interval
+        self.similarity_threshold = similarity_threshold
+        self.model_name = model_name
+        self.distance_metric = distance_metric
         
-        # Create save directory
-        self.save_dir.mkdir(exist_ok=True)
+        # Create database directory if it doesn't exist
+        self.database_path.mkdir(exist_ok=True)
         
-        # Thread management
-        self.running = False
-        self.thread = None
-        self.save_queue = queue.Queue(maxsize=50)
+        # Face recognition state
+        self.recognized_faces = {}
+        self.last_recognition_time = 0
+        self.recognition_results = []
         
-        # Rate limiting per class
-        self.last_save_time = {}
-        self.last_custom_server_upload_time = {}
+        # Initialize DeepFace
+        self._initialize_deepface()
         
-        # Frame deduplication
-        self.last_uploaded_frame_hash = None
-        self.consecutive_alert_count = 0
-        self.last_alert_time = 0
+    def _initialize_deepface(self):
+        """Initialize DeepFace and verify database structure"""
+        print("Initializing DeepFace for face recognition...")
+        print(f"Using model: {self.model_name}")
+        print(f"Distance metric: {self.distance_metric}")
+        print(f"Similarity threshold: {self.similarity_threshold}")
         
-        print(f"💾 SavingDetectionThread initialized - Save dir: {save_dir}")
-        if self.custom_server_url:
-            print(f"🔗 Custom server upload enabled: {custom_server_url}")
-            print(f"⏰ Custom server cooldown: {custom_server_min_interval}s")
-            if self.custom_server_token and self.custom_server_id:
-                print(f"🔑 Using token: {self.custom_server_token}, ID: {self.custom_server_id}")
-
-    # ADDED: Missing methods for thread management
+        # Test DeepFace installation
+        try:
+            # Quick test to verify DeepFace works
+            test_result = DeepFace.verify(
+                img1_path="none.jpg", 
+                img2_path="none.jpg", 
+                enforce_detection=False,
+                model_name=self.model_name,
+                distance_metric=self.distance_metric
+            )
+            print("DeepFace initialized successfully")
+        except Exception as e:
+            print(f"DeepFace initialization note: {e}")
+            
+        print(f"Face database location: {self.database_path.absolute()}")
+        
+        # Check if database has proper structure
+        self._check_database_structure()
+        
     def start(self):
-        """Start the saving processing thread"""
-        self.running = True
-        self.thread = threading.Thread(target=self._saving_loop, name="SavingDetectionThread")
-        self.thread.daemon = True
-        self.thread.start()
-        print("🚀 SavingDetection thread started (storage mode)")
-
+        """Start the enhanced pipeline"""
+        print("Starting Enhanced Face Recognition Pipeline...")
+        self.selective_processor.start()
+        
     def stop(self):
-        """Stop the saving thread"""
-        self.running = False
-        if self.thread:
-            self.thread.join(timeout=2.0)
-        print("🛑 SavingDetection thread stopped")
+        """Stop the pipeline"""
+        self.selective_processor.stop()
 
-    def save_frame(self, frame, frame_num, timestamp, detected_objects, alert_classes):
-        """
-        Queue a frame for saving - called by main processor
-        """
-        try:
-            data = {
-                'frame': frame.copy(),
-                'frame_num': frame_num,
-                'timestamp': timestamp,
-                'detected_objects': detected_objects,
-                'alert_classes': alert_classes
-            }
-            self.save_queue.put(data, block=False)
-            return True
-        except queue.Full:
-            print("⚠️ Saving queue full - dropping frame")
-            return False
+    # FIXED: Added self parameter
+    def get_available_models(self):
+        """Return available DeepFace models with their characteristics"""
+        return {
+            #"VGG-Face": {"dimensions": 4096, "accuracy": "96.7%", "speed": "Medium"},
+            "Facenet": {"dimensions": 128, "accuracy": "97.4%", "speed": "Fast"},
+            #"Facenet512": {"dimensions": 512, "accuracy": "98.4%", "speed": "Medium"},
+            #"ArcFace": {"dimensions": 512, "accuracy": "96.7%", "speed": "Medium"},
+            #"Dlib": {"dimensions": 128, "accuracy": "96.8%", "speed": "Fast"},
+            #"SFace": {"dimensions": 512, "accuracy": "93.0%", "speed": "Fast"},
+            #"OpenFace": {"dimensions": 128, "accuracy": "78.7%", "speed": "Fastest"}
+        }
 
-    def _saving_loop(self):
-        """Process saving requests from queue"""
-        while self.running:
-            try:
-                data = self.save_queue.get(timeout=0.5)
-                self._process_save_request(data)
-                self.save_queue.task_done()
-            except queue.Empty:
-                continue
-            except Exception as e:
-                print(f"❌ Saving error: {e}")
-
-    def _process_save_request(self, data):
-        """Process a single save request with rate limiting"""
-        frame = data['frame']
-        frame_num = data['frame_num']
-        timestamp = data['timestamp']
-        detected_objects = data['detected_objects']
-        alert_classes = data['alert_classes']
-        
-        current_time = time.time()
-        
-        # Rate limiting: Check if we should save based on alert classes
-        should_save = False
-        for class_id in alert_classes:
-            class_key = f"class_{class_id}"
-            
-            if class_key not in self.last_save_time:
-                should_save = True
-                break
-            elif current_time - self.last_save_time[class_key] >= self.min_save_interval:
-                should_save = True
-                break
-        
-        if not should_save:
-            return
-        
-        # Update last save times for all alert classes in this frame
-        for class_id in alert_classes:
-            class_key = f"class_{class_id}"
-            self.last_save_time[class_key] = current_time
-        
-        # Save the frame
-        self._save_detected_frame(frame, frame_num, timestamp, detected_objects, alert_classes)
-
-    def _save_detected_frame(self, frame, frame_num, timestamp, detected_objects, alert_classes):
-        """Save the annotated frame with proper metadata and smart server uploads"""
-        try:
-            # Create filename with timestamp and alert classes
-            timestamp_str = time.strftime("%Y%m%d_%H%M%S")
-            
-            # Get class names for filename
-            class_names = []
-            for class_id in alert_classes:
-                class_name = f"class_{class_id}"
-                class_names.append(class_name.replace(" ", "_"))
-            
-            classes_str = "_".join(class_names)
-            filename = f"alert_{timestamp_str}_frame{frame_num}_{classes_str}.png"
-            filepath = self.save_dir / filename
-            
-            # Save the frame (already has bounding boxes and overlays)
-            success = cv2.imwrite(str(filepath), frame)
-            
-            if success:
-                print(f"💾 Saved detected frame: {filename}")
-                
-                # Always send to original server if configured (existing behavior)
-                if self.server_url:
-                    self._send_to_server(filepath, detected_objects, frame_num, alert_classes)
-                
-                # SMART: Send to custom server only if criteria are met
-                if self.custom_server_url:
-                    should_upload = self._should_upload_to_custom_server(
-                        frame, filepath, detected_objects, frame_num, alert_classes
-                    )
-                    if should_upload:
-                        self._send_to_custom_server(filepath, detected_objects, frame_num, alert_classes)
-            else:
-                print(f"❌ Failed to save frame: {filename}")
-                
-        except Exception as e:
-            print(f"❌ Error saving detected frame: {e}")
-            
-    def _send_to_server(self, filepath, detected_objects, frame_num, alert_classes):
-        """Send detected image and data to server (optional)"""
-        try:
-            if not self.server_url:
-                return
-                
-            if not filepath.exists():
-                print(f"❌ File not found for sending: {filepath}")
-                return
-            
-            # Prepare data for server
-            detection_data = {
-                'frame_num': frame_num,
-                'timestamp': time.time(),
-                'detections': detected_objects,
-                'alert_classes': alert_classes,
-                'total_detections': len(detected_objects)
-            }
-            
-            # Send multipart request
-            with open(filepath, 'rb') as image_file:
-                files = {'image': (filepath.name, image_file, 'image/png')}
-                data = {'detection_data': str(detection_data)}
-                
-                response = requests.post(
-                    self.server_url, 
-                    files=files, 
-                    data=data,
-                    timeout=10
-                )
-                
-                if response.status_code == 200:
-                    print(f"✅ Image sent to server: {filepath.name}")
-                else:
-                    print(f"⚠️ Server returned status {response.status_code}")
-                    
-        except Exception as e:
-            print(f"❌ Error sending image to server: {e}")
-
-    def _should_upload_to_custom_server(self, frame, filepath, detected_objects, frame_num, alert_classes):
-        """
-        Smart decision making for custom server uploads
-        Returns True only if upload should proceed based on multiple criteria
-        """
-        current_time = time.time()
-        
-        # Criterion 1: Longer cooldown per alert class
-        should_upload_by_cooldown = False
-        for class_id in alert_classes:
-            class_key = f"class_{class_id}"
-            
-            # Check if enough time has passed since last custom server upload for this class
-            if class_key not in self.last_custom_server_upload_time:
-                should_upload_by_cooldown = True
-                break
-            elif current_time - self.last_custom_server_upload_time[class_key] >= self.custom_server_min_interval:
-                should_upload_by_cooldown = True
-                break
-        
-        if not should_upload_by_cooldown:
-            return False
-        
-        # Criterion 2: Frame similarity/deduplication
-        current_frame_hash = self._compute_frame_hash(frame)
-        if self.last_uploaded_frame_hash is not None:
-            similarity = self._compare_frame_hashes(self.last_uploaded_frame_hash, current_frame_hash)
-            if similarity > 0.95:  # 95% similar - too similar to upload
-                print(f"🔄 Frame too similar to last upload ({similarity:.2%}), skipping custom server")
-                return False
-        
-        # Criterion 3: Consecutive alert sequence (bonus criteria)
-        time_since_last_alert = current_time - self.last_alert_time
-        if time_since_last_alert < 5.0:  # Alerts within 5 seconds are considered consecutive
-            self.consecutive_alert_count += 1
+    def set_model(self, model_name):
+        """Dynamically change the DeepFace model"""
+        available_models = self.get_available_models()
+        if model_name in available_models:
+            self.model_name = model_name
+            self._invalidate_cached_representations()
+            print(f"Changed model to: {model_name}")
         else:
-            self.consecutive_alert_count = 1
-        
-        self.last_alert_time = current_time
-        
-        # Only upload if we have multiple consecutive alerts OR it passes all other criteria
-        if self.consecutive_alert_count >= 2:  # Upload on 2nd consecutive alert
-            print(f"🔢 Consecutive alert #{self.consecutive_alert_count}, proceeding with upload")
-            return True
-        elif should_upload_by_cooldown:  # Or if cooldown period has passed
-            return True
-        
-        return False
+            print(f"Model {model_name} not available. Using {self.model_name}")
 
-    def _compute_frame_hash(self, frame):
-        """Compute a simple hash of the frame for similarity comparison"""
+    def set_distance_metric(self, metric):
+        """Change distance metric (cosine, euclidean, euclidean_l2)"""
+        valid_metrics = ["cosine", "euclidean", "euclidean_l2"]
+        if metric in valid_metrics:
+            self.distance_metric = metric
+            self._invalidate_cached_representations()
+            print(f"Changed distance metric to: {metric}")
+        else:
+            print(f"Invalid metric. Using {self.distance_metric}")
+
+    def process_frame_with_recognition(self, frame, detections_data):
+        """
+        Enhanced processing that adds face recognition to detected faces
+        This should be called in the processing loop
+        """
+        current_time = time.time()
+        
+        # Only run recognition at specified intervals to reduce CPU load
+        if current_time - self.last_recognition_time >= self.recognition_interval:
+            self.last_recognition_time = current_time
+            return self._run_face_recognition(frame, detections_data)
+        
+        return frame
+        
+    def _run_face_recognition(self, frame, detections_data):
+        """
+        Run face recognition on detected faces in the frame
+        """
+        if not detections_data or len(detections_data['boxes']) == 0:
+            return frame
+            
+        annotated_frame = frame.copy()
+        recognition_occurred = False
+        
+        # Extract face detections (assuming your face detection model returns 'face' class)
+        for i, (box, conf, cls_id, class_name) in enumerate(zip(
+            detections_data['boxes'], 
+            detections_data['confidences'], 
+            detections_data['class_ids'],
+            detections_data['class_names']
+        )):
+            # Only process if this detection is a face
+            if 'face' in class_name.lower() or cls_id == 0:  # Adjust based on your model
+                x1, y1, x2, y2 = box
+                
+                # Crop face region with padding
+                face_crop = self._crop_face_region(frame, x1, y1, x2, y2)
+                
+                if face_crop is not None:
+                    # Run face recognition
+                    recognition_result = self._recognize_face(face_crop)
+                    
+                    if recognition_result:
+                        recognition_occurred = True
+                        # Update recognized faces tracking
+                        face_id = f"face_{i}_{int(time.time())}"
+                        self.recognized_faces[face_id] = {
+                            "name": recognition_result["identity"],
+                            "confidence": recognition_result["confidence"],
+                            "last_seen": datetime.now().isoformat(),
+                            "bbox": [float(x1), float(y1), float(x2), float(y2)]
+                        }
+                        
+                        # Add recognition info to bounding box
+                        label = f"{recognition_result['identity']} ({recognition_result['confidence']:.2f})"
+                        color = (0, 255, 0)  # Green for recognized faces
+                        
+                        # Draw enhanced bounding box with recognition info
+                        cv.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 3)
+                        cv.putText(annotated_frame, label, (int(x1), int(y1)-10), 
+                                  cv.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        
+        if recognition_occurred:
+            # Add recognition overlay to frame
+            annotated_frame = self._add_recognition_overlay(annotated_frame)
+            
+        return annotated_frame
+        
+    def _crop_face_region(self, frame, x1, y1, x2, y2, padding=0.2):
+        """Crop face region with padding for better recognition"""
         try:
-            # Resize to smaller dimensions for faster processing
-            small_frame = cv2.resize(frame, (64, 64))
-            # Convert to grayscale
-            gray_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
-            # Compute simple hash (average intensity)
-            return np.mean(gray_frame)
+            h, w = frame.shape[:2]
+            
+            # Calculate padding
+            pad_x = int((x2 - x1) * padding)
+            pad_y = int((y2 - y1) * padding)
+            
+            # Apply padding with bounds checking
+            x1_padded = max(0, int(x1) - pad_x)
+            y1_padded = max(0, int(y1) - pad_y)
+            x2_padded = min(w, int(x2) + pad_x)
+            y2_padded = min(h, int(y2) + pad_y)
+            
+            face_crop = frame[y1_padded:y2_padded, x1_padded:x2_padded]
+            
+            # Ensure the crop is valid
+            if face_crop.size > 0 and face_crop.shape[0] > 10 and face_crop.shape[1] > 10:
+                return face_crop
+                
         except Exception as e:
-            print(f"❌ Error computing frame hash: {e}")
+            print(f"Error cropping face: {e}")
+            
+        return None
+        
+    def _recognize_face(self, face_image):
+        """
+        Use DeepFace.find() to recognize face against local database
+        """
+        try:
+            # Convert BGR to RGB for DeepFace
+            rgb_face = cv.cvtColor(face_image, cv.COLOR_BGR2RGB)
+            
+            # Use DeepFace.find() for database search
+            dfs = DeepFace.stream(
+                img_path=rgb_face,
+                db_path=str(self.database_path),
+                model_name=self.model_name,
+                detector_backend="skip",  # We already have cropped faces
+                enforce_detection=False,
+                silent=True,
+                distance_metric=self.distance_metric
+            )
+            
+            if dfs and len(dfs) > 0:
+                df = dfs[0]  # First dataframe for the first face found
+                
+                if len(df) > 0:
+                    best_match = df.iloc[0]
+                    distance = best_match['distance']
+                    
+                    # Convert distance to similarity score (depends on metric)
+                    if self.distance_metric == "cosine":
+                        similarity = 1 - distance  # Cosine distance ranges [0, 2]
+                    else:  # euclidean or euclidean_l2
+                        similarity = 1 / (1 + distance)  # Convert to similarity score
+                    
+                    if similarity >= self.similarity_threshold:
+                        # Extract identity from file path
+                        identity_path = Path(best_match['identity'])
+                        identity_name = identity_path.parent.name
+                        
+                        return {
+                            "identity": identity_name,
+                            "confidence": similarity,
+                            "distance": distance,
+                            "source_image": str(best_match['identity'])
+                        }
+                        
+        except Exception as e:
+            print(f"DeepFace recognition error: {e}")
+            
+        return None
+        
+    def _add_recognition_overlay(self, frame):
+        """Add recognition information overlay to frame"""
+        h, w = frame.shape[:2]
+        
+        # Create semi-transparent overlay
+        overlay = frame.copy()
+        cv.rectangle(overlay, (w-300, 10), (w-10, 150), (0, 0, 0), -1)
+        frame = cv.addWeighted(overlay, 0.7, frame, 0.3, 0)
+        
+        # Add recognition info
+        current_recognition = list(self.recognized_faces.values())[-3:]  # Show last 3
+        
+        cv.putText(frame, "RECOGNIZED FACES:", (w-290, 30), 
+                  cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        for i, face in enumerate(current_recognition):
+            y_pos = 60 + (i * 30)
+            text = f"{face['name']} ({face['confidence']:.2f})"
+            cv.putText(frame, text, (w-290, y_pos), 
+                      cv.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+        
+        return frame
+        
+    # REMOVED: First duplicate add_face_to_database method - keeping only the one below
+        
+    def get_recognized_faces_report(self):
+        """Get a report of recently recognized faces"""
+        return {
+            "total_recognized": len(self.recognized_faces),
+            "recent_faces": list(self.recognized_faces.values())[-5:],  # Last 5 faces
+            "database_size": self._get_database_size()
+        }
+        
+    def _get_database_size(self):
+        """Count number of people in database"""
+        try:
+            return len([p for p in self.database_path.iterdir() if p.is_dir()])
+        except:
             return 0
 
-    def _compare_frame_hashes(self, hash1, hash2):
-        """Compare two frame hashes and return similarity (0.0 to 1.0)"""
-        try:
-            # Simple similarity based on intensity difference
-            diff = abs(hash1 - hash2)
-            max_possible_diff = 255  # Maximum difference for grayscale
-            similarity = 1.0 - (diff / max_possible_diff)
-            return max(0.0, min(1.0, similarity))
-        except Exception as e:
-            print(f"❌ Error comparing frame hashes: {e}")
-            return 0.0
-
-    def _send_to_custom_server(self, filepath, detected_objects, frame_num, alert_classes):
-        """Send detected image to custom server endpoint - CORRECTED VERSION"""
-        try:
-            if not self.custom_server_url:
-                return
-        
-            if not filepath.exists():
-                print(f"❌ File not found for custom server: {filepath}")
-                return
-    
-            current_time = time.time()
-    
-            # Read the image file and encode as base64
-            with open(filepath, 'rb') as image_file:
-                image_data = image_file.read()
-            import base64
-            image_base64 = base64.b64encode(image_data).decode('utf-8')
-    
-            # PREPARE FORM DATA WITH CORRECT FIELD NAMES AND ALL REQUIRED FIELDS
-            data = {
-                'token_pengguna': self.custom_server_token,
-                'id_kategori_pusat_data': '6',
-                'id_sub_kategori_pusat_data': self.custom_server_id,
-                'nc': str(int(current_time * 1000)),
-                'media2[]': image_base64,  # ✅ CORRECTED: media2[] instead of media20
-                'first_date': time.strftime("%Y-%m-%d %H:%M:%S"),  # ✅ ADDED: Required field
-                'url': f'https://www.vps.scasda.my.id//v2/#pusat_data&data_master=60{self.custom_server_token}{self.custom_server_id}'  # ✅ ADDED: Required field
-            }
-    
-            print(f"🔍 DEBUG - Sending corrected form data")
-            print(f"🔍   URL: {self.custom_server_url}")
-            print(f"🔍   Token: {self.custom_server_token}")
-            print(f"🔍   ID: {self.custom_server_id}")
-            print(f"🔍   First Date: {data['first_date']}")
-            print(f"🔍   URL Param: {data['url']}")
-            print(f"🔍   Image size: {len(image_data)} bytes")
-            print(f"🔍   Base64 length: {len(image_base64)} chars")
-            print(f"🔍   Field name: media2[]")
-    
-            # Send as regular form data
-            response = requests.post(
-                self.custom_server_url, 
-                data=data,
-                timeout=30  # Increased timeout for debugging
-            )
-    
-            print(f"🔍 DEBUG - Server response status: {response.status_code}")
-            print(f"🔍 DEBUG - Server response headers: {response.headers}")
-            print(f"🔍 DEBUG - Server response content: {response.text}")
-    
-            if response.status_code == 200:
-                print(f"✅ Image successfully sent to custom server: {filepath.name}")
-            
-                # Update tracking after successful upload
-                self.last_uploaded_frame_hash = self._compute_frame_hash(
-                    cv2.imread(str(filepath))
-                )
-                for class_id in alert_classes:
-                    class_key = f"class_{class_id}"
-                    self.last_custom_server_upload_time[class_key] = current_time
-        
+    def _check_database_structure(self):
+        """Verify the database has proper folder structure"""
+        if self.database_path.exists():
+            subdirs = [d for d in self.database_path.iterdir() if d.is_dir()]
+            if subdirs:
+                print(f"Found {len(subdirs)} persons in database")
             else:
-                print(f"⚠️ Custom server returned status {response.status_code}: {response.text}")
-        
+                print("Warning: Database directory exists but no person folders found")
+                print("Expected structure: database/PersonName/image.jpg")
+
+    # KEEPING: Only one add_face_to_database method
+    def add_face_to_database(self, face_image, person_name):
+        """
+        Add a new face to the database with proper naming
+        """
+        try:
+            person_path = self.database_path / person_name
+            person_path.mkdir(exist_ok=True)
+            
+            # Generate unique filename
+            timestamp = int(time.time())
+            filename = f"{timestamp}.jpg"
+            filepath = person_path / filename
+            
+            # Save the face image (in BGR format for OpenCV)
+            cv.imwrite(str(filepath), face_image)
+            
+            print(f"Added face to database: {person_name} at {filepath}")
+            
+            # Invalidate cached representations to force refresh
+            self._invalidate_cached_representations()
+            
+            return True
+            
         except Exception as e:
-            print(f"❌ Error sending image to custom server: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"Error adding face to database: {e}")
+            return False
 
-    def set_server_url(self, server_url):
-        """Update server URL"""
-        self.server_url = server_url
-        print(f"🌐 Updated server URL: {server_url}")
-
-    def set_custom_server_url(self, custom_server_url):
-        """Update custom server URL"""
-        self.custom_server_url = custom_server_url
-        print(f"🔗 Updated custom server URL: {custom_server_url}")
-
-    def set_save_directory(self, save_dir):
-        """Update save directory"""
-        self.save_dir = Path(save_dir)
-        self.save_dir.mkdir(exist_ok=True)
-        print(f"📁 Updated save directory: {save_dir}")
-
-    def set_custom_server_interval(self, interval):
-        """Update custom server upload interval"""
-        self.custom_server_min_interval = max(1.0, interval)
-        print(f"⏰ Updated custom server upload interval: {interval}s")
-
-class AudioAlertManager:
-    """
-    Manages audio alerts in a separate thread to avoid blocking main processing.
-    """
-    def __init__(self, target_url):
-        self.target_url = target_url
-        self.alert_queue = queue.Queue()
-        self.running = False
-        self.thread = None
-        
-        # Existing gap control
-        self.last_alert_time = 0
-        self.min_alert_gap = 10.0
-        
-        # Alert fatigue prevention
-        self.message_rotations = self._initialize_message_rotations()
-        self.last_message_index = {}
-        
-        self.start()
-    
-    def _initialize_message_rotations(self):
-        """Define message variations to prevent fatigue"""
-        return {
-            "person_with_helmet_forklift": [
-                "Forklift Operator tanpa masker terdeteksi",
-                "Perhatian: Operator forklift tidak pakai masker",
-                "Safety alert: Masker tidak dipakai operator forklift"
-            ],
-            "person_with_mask_forklift": [
-                "Forklift Operator tanpa helm terdeteksi",
-                "Perhatian: Operator forklift lupa helm safety",
-                "Safety alert: Helm safety tidak dipakai operator"
-            ],
-            "person_without_mask_helmet_forklift": [
-                "Forklift Operator tanpa masker dan helm terdeteksi",
-                "Safety alert: Operator forklift tidak pakai masker dan helm",
-                "Peringatan: Masker dan helm tidak digunakan operator"
-            ],
-            "person_without_mask_nonForklift": [
-                "Non forklift operator tanpa masker terdeteksi",
-                "Perhatian: Staff tanpa masker di area produksi",
-                "Safety alert: Orang tanpa masker terdeteksi"
-            ]
-        }
-    
-    def start(self):
-        """Start the audio alert processing thread."""
-        self.running = True
-        self.thread = threading.Thread(target=self._process_alerts, name="AudioAlertThread")
-        self.thread.daemon = True  # Daemon thread will exit when main thread exits
-        self.thread.start()
-        print("Audio Alert Manager started.")
-    
-    def trigger_alert(self, class_name, confidence):
-        """Add alert to queue with smart deduplication"""
-        alert_data = {
-            'class_name': class_name,
-            'confidence': confidence,
-            'timestamp': time.time()
-        }
-        
-        # Check if same alert already in queue
-        if not self._is_duplicate_alert(class_name):
+    def _invalidate_cached_representations(self):
+        """Delete cached representations to force DeepFace to rebuild"""
+        pickle_path = self.database_path / "representations_deepface.pkl"
+        if pickle_path.exists():
             try:
-                self.alert_queue.put(alert_data, block=False)
-                print(f"🎵 Audio alert queued: {class_name}")
-            except queue.Full:
-                print("⚠️ Alert queue full, dropping alert.")
-
-    def _is_duplicate_alert(self, class_name):
-        """Check if same alert class already queued"""
-        # Simple duplicate prevention - can be enhanced
-        for item in list(self.alert_queue.queue):
-            if item['class_name'] == class_name:
-                return True
-        return False
-    
-    def _process_alerts(self):
-        """Process alerts from the queue with timing control"""
-        while self.running:
-            try:
-                # Add gap control before processing next alert
-                current_time = time.time()
-                time_since_last_alert = current_time - self.last_alert_time
-                
-                if time_since_last_alert < self.min_alert_gap:
-                    # Wait remaining time before next alert
-                    wait_time = self.min_alert_gap - time_since_last_alert
-                    time.sleep(wait_time)
-                
-                alert_data = self.alert_queue.get(timeout=1.0)
-                
-                self._send_audio_alert(alert_data)
-                self.alert_queue.task_done()
-                
-                # Update last alert time after sending
-                self.last_alert_time = time.time()
-                
-            except queue.Empty:
-                continue
+                pickle_path.unlink()
+                print("Invalidated cached representations")
             except Exception as e:
-                print(f"❌ Error processing audio alert: {e}")
+                print(f"Error invalidating cache: {e}")
+
+def main_enhanced():
+    """
+    Enhanced main function with face recognition capabilities
+    """
+    print("Enhanced Face Recognition Pipeline")
+    print("=" * 60)
+    print("This pipeline uses:")
+    print("- SelectiveFrameProcessor for efficient face detection")
+    print("- DeepFace for face recognition against local database")
+    print("=" * 60)
     
-    def _send_audio_alert(self, alert_data):
-        """Send HTTP GET request with rotated messages to prevent fatigue"""
+    # Configuration
+    FACE_DETECTION_MODEL = input("Enter YOLO model path (or press Enter for pretrained model): ").strip()  # Use a face detection model
+    DATABASE_PATH = input("Enter Database path: ").strip()
+    PROCESSING_INTERVAL = float(input("Enter processing interval in seconds (default 3.0): ") or "3.0")  # Faster processing for face detection
+    RECOGNITION_INTERVAL = float(input("Enter Recognition interval in seconds (default 2.0): ") or "2.0")  # Slower recognition to save CPU
+    
+    # Initialize the selective processor with face detection model
+    selective_processor = SelectiveFrameProcessor(
+        source=0,  # Camera
+        processing_interval=PROCESSING_INTERVAL,
+        display_width=640,
+        model_path=FACE_DETECTION_MODEL,
+        conf_threshold=0.7  # Higher confidence for faces
+    )
+    
+    # Initialize the enhanced processor
+    enhanced_processor = FaceRecognitionProcessor(
+        selective_processor=selective_processor,
+        database_path=DATABASE_PATH,
+        recognition_interval=RECOGNITION_INTERVAL,
+        similarity_threshold=0.6
+    )
+    
+    # Modify the selective processor's detection method to work with enhanced processor
+    original_detection_method = selective_processor._run_yolo_detection
+    
+    def enhanced_detection(frame):
+        # Run original YOLO detection
+        processed_frame, detections_count = original_detection_method(frame)
+        
+        # Extract detection data for face recognition
+        detections_data = getattr(selective_processor, 'last_detection_data', None)
+        
+        # If we have detection data, run face recognition
+        if detections_data and detections_count > 0:
+            processed_frame = enhanced_processor.process_frame_with_recognition(
+                processed_frame, detections_data
+            )
+            
+        return processed_frame, detections_count
+    
+    # Replace the detection method
+    selective_processor._run_yolo_detection = enhanced_detection
+    
+    # Also need to modify the YOLO detection to store detection data
+    original_yolo_method = selective_processor._run_yolo_detection
+    
+    def storing_detection_method(frame):
         try:
-            class_name = alert_data['class_name']
-            confidence = alert_data['confidence']
+            results = selective_processor.model.predict(
+                source=frame,
+                conf=selective_processor.conf_threshold,
+                verbose=False
+            )
             
-            # Get rotated message
-            message = self._get_rotated_message(class_name)
-            
-            # URL encode the message
-            import urllib.parse
-            encoded_message = urllib.parse.quote(message)
-            
-            # Build and send request (existing code)
-            url_with_params = f"{self.target_url}?pesan={encoded_message}"
-            response = requests.get(url_with_params, timeout=5)
-            
-            if response.status_code == 200:
-                print(f"✅ Audio alert sent for {class_name}")
-                print(f"🔊 Custom Message: '{message}'")
-            else:
-                print(f"⚠️ Server returned status {response.status_code}")
+            if results and len(results) > 0:
+                result = results[0]
+                annotated_frame = frame.copy()
+                detections_data = {
+                    'boxes': [],
+                    'confidences': [],
+                    'class_ids': [],
+                    'class_names': []
+                }
                 
-        except requests.exceptions.RequestException as e:
-            print(f"❌ Network error sending audio alert: {e}")
+                if result.boxes is not None:
+                    boxes = result.boxes.xyxy.cpu().numpy()
+                    confidences = result.boxes.conf.cpu().numpy()
+                    class_ids = result.boxes.cls.cpu().numpy().astype(int)
+                    class_names = result.names
+                    
+                    # Store detection data for face recognition
+                    detections_data['boxes'] = boxes
+                    detections_data['confidences'] = confidences
+                    detections_data['class_ids'] = class_ids
+                    detections_data['class_names'] = [class_names[cls_id] for cls_id in class_ids]
+                    
+                    selective_processor.last_detection_data = detections_data
+                    
+                    # Draw bounding boxes
+                    for i, (box, conf, cls_id) in enumerate(zip(boxes, confidences, class_ids)):
+                        x1, y1, x2, y2 = box
+                        class_name = class_names[cls_id]
+                        color = selective_processor._get_color_for_class(cls_id)
+                        cv.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+                        label = f"{class_name} {conf:.2f}"
+                        cv.putText(annotated_frame, label, (int(x1), int(y1)-10), 
+                                  cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                    
+                    selective_processor.detection_count += len(boxes)
+                    return annotated_frame, len(boxes)
+                
+            return frame, 0
+            
         except Exception as e:
-            print(f"❌ Unexpected error sending audio alert: {e}")
+            print(f"YOLO inference error: {e}")
+            return frame, 0
     
-    def stop(self):
-        """Stop the alert processing thread - FIXED VERSION"""
-        self.running = False
-        if self.thread:
-            self.thread.join(timeout=2.0)
-        print("Audio Alert Manager stopped.")
+    selective_processor._run_yolo_detection = storing_detection_method
+    
+    try:
+        enhanced_processor.start()
         
-    def _get_rotated_message(self, class_name):
-        """Get next message in rotation to prevent fatigue"""
-        # Default message if no rotation defined
-        default_message = f"Peringatan: {class_name} terdeteksi"
+        print("\nFace Recognition Pipeline Started!")
+        print("Controls:")
+        print("  ESC: Exit")
+        print("  'a': Add current face to database (when face is detected)")
+        print("  'r': Show recognition report")
         
-        if class_name not in self.message_rotations:
-            return default_message
+        # Keep main thread alive while threads run
+        while selective_processor.running:
+            time.sleep(0.1)
+            
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+    finally:
+        enhanced_processor.stop()
         
-        variations = self.message_rotations[class_name]
+        # Print final recognition report
+        report = enhanced_processor.get_recognized_faces_report()
+        print("\nFinal Recognition Report:")
+        print(f"Total faces recognized: {report['total_recognized']}")
+        print(f"People in database: {report['database_size']}")
+          
+    def get_recognized_faces_report(self):
+        """Get a report of recently recognized faces"""
+        return {
+            "total_recognized": len(self.recognized_faces),
+            "recent_faces": list(self.recognized_faces.values())[-5:],  # Last 5 faces
+            "database_size": self._get_database_size()
+        }
         
-        # Initialize or rotate index
-        if class_name not in self.last_message_index:
-            self.last_message_index[class_name] = 0
-        else:
-            self.last_message_index[class_name] = (self.last_message_index[class_name] + 1) % len(variations)
+    def _get_database_size(self):
+        """Count number of people in database"""
+        try:
+            return len([p for p in self.database_path.iterdir() if p.is_dir()])
+        except:
+            return 0
+
+    def _check_database_structure(self):
+        """Verify the database has proper folder structure"""
+        if self.database_path.exists():
+            subdirs = [d for d in self.database_path.iterdir() if d.is_dir()]
+            if subdirs:
+                print(f"Found {len(subdirs)} persons in database")
+            else:
+                print("Warning: Database directory exists but no person folders found")
+                print("Expected structure: database/PersonName/image.jpg")
+
+    def add_face_to_database(self, face_image, person_name):
+        """
+        Add a new face to the database with proper naming
+        """
+        try:
+            person_path = self.database_path / person_name
+            person_path.mkdir(exist_ok=True)
+            
+            # Generate unique filename
+            timestamp = int(time.time())
+            filename = f"{timestamp}.jpg"
+            filepath = person_path / filename
+            
+            # Convert to RGB and save
+            rgb_face = cv.cvtColor(face_image, cv.COLOR_BGR2RGB)
+            
+            # Save the face image
+            cv.imwrite(str(filepath), face_image)  # Keep BGR for OpenCV display consistency
+            
+            print(f"Added face to database: {person_name} at {filepath}")
+            
+            # Invalidate cached representations to force refresh
+            self._invalidate_cached_representations()
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error adding face to database: {e}")
+            return False
+
+    def _invalidate_cached_representations(self):
+        """Delete cached representations to force DeepFace to rebuild"""
+        pickle_path = self.database_path / "representations_deepface.pkl"
+        if pickle_path.exists():
+            try:
+                pickle_path.unlink()
+                print("Invalidated cached representations")
+            except Exception as e:
+                print(f"Error invalidating cache: {e}")
+
+
+def main_enhanced():
+    """
+    Enhanced main function with face recognition capabilities
+    """
+    print("Enhanced Face Recognition Pipeline")
+    print("=" * 60)
+    print("This pipeline uses:")
+    print("- SelectiveFrameProcessor for efficient face detection")
+    print("- DeepFace for face recognition against local database")
+    print("=" * 60)
+    
+    # Configuration
+    FACE_DETECTION_MODEL = input("Enter YOLO model path (or press Enter for pretrained model): ").strip()  # Use a face detection model
+    DATABASE_PATH = input("Enter Database path: ").strip()
+    PROCESSING_INTERVAL = float(input("Enter processing interval in seconds (default 3.0): ") or "3.0")  # Faster processing for face detection
+    RECOGNITION_INTERVAL = float(input("Enter Recognition interval in seconds (default 2.0): ") or "2.0")  # Slower recognition to save CPU
+    
+    # Initialize the selective processor with face detection model
+    selective_processor = SelectiveFrameProcessor(
+        source=0,  # Camera
+        processing_interval=PROCESSING_INTERVAL,
+        display_width=640,
+        model_path=FACE_DETECTION_MODEL,
+        conf_threshold=0.7  # Higher confidence for faces
+    )
+    
+    # Initialize the enhanced processor
+    enhanced_processor = FaceRecognitionProcessor(
+        selective_processor=selective_processor,
+        database_path=DATABASE_PATH,
+        recognition_interval=RECOGNITION_INTERVAL,
+        similarity_threshold=0.6
+    )
+    
+    # Modify the selective processor's detection method to work with enhanced processor
+    original_detection_method = selective_processor._run_yolo_detection
+    
+    def enhanced_detection(frame):
+        # Run original YOLO detection
+        processed_frame, detections_count = original_detection_method(frame)
         
-        return variations[self.last_message_index[class_name]]
+        # Extract detection data for face recognition
+        detections_data = getattr(selective_processor, 'last_detection_data', None)
+        
+        # If we have detection data, run face recognition
+        if detections_data and detections_count > 0:
+            processed_frame = enhanced_processor.process_frame_with_recognition(
+                processed_frame, detections_data
+            )
+            
+        return processed_frame, detections_count
+    
+    # Replace the detection method
+    selective_processor._run_yolo_detection = enhanced_detection
+    
+    # Also need to modify the YOLO detection to store detection data
+    original_yolo_method = selective_processor._run_yolo_detection
+    
+    def storing_detection_method(frame):
+        try:
+            results = selective_processor.model.predict(
+                source=frame,
+                conf=selective_processor.conf_threshold,
+                verbose=False
+            )
+            
+            if results and len(results) > 0:
+                result = results[0]
+                annotated_frame = frame.copy()
+                detections_data = {
+                    'boxes': [],
+                    'confidences': [],
+                    'class_ids': [],
+                    'class_names': []
+                }
+                
+                if result.boxes is not None:
+                    boxes = result.boxes.xyxy.cpu().numpy()
+                    confidences = result.boxes.conf.cpu().numpy()
+                    class_ids = result.boxes.cls.cpu().numpy().astype(int)
+                    class_names = result.names
+                    
+                    # Store detection data for face recognition
+                    detections_data['boxes'] = boxes
+                    detections_data['confidences'] = confidences
+                    detections_data['class_ids'] = class_ids
+                    detections_data['class_names'] = [class_names[cls_id] for cls_id in class_ids]
+                    
+                    selective_processor.last_detection_data = detections_data
+                    
+                    # Draw bounding boxes
+                    for i, (box, conf, cls_id) in enumerate(zip(boxes, confidences, class_ids)):
+                        x1, y1, x2, y2 = box
+                        class_name = class_names[cls_id]
+                        color = selective_processor._get_color_for_class(cls_id)
+                        cv.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+                        label = f"{class_name} {conf:.2f}"
+                        cv.putText(annotated_frame, label, (int(x1), int(y1)-10), 
+                                  cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                    
+                    selective_processor.detection_count += len(boxes)
+                    return annotated_frame, len(boxes)
+                
+            return frame, 0
+            
+        except Exception as e:
+            print(f"YOLO inference error: {e}")
+            return frame, 0
+    
+    selective_processor._run_yolo_detection = storing_detection_method
+    
+    try:
+        enhanced_processor.start()
+        
+        print("\nFace Recognition Pipeline Started!")
+        print("Controls:")
+        print("  ESC: Exit")
+        print("  'a': Add current face to database (when face is detected)")
+        print("  'r': Show recognition report")
+        
+        # Keep main thread alive while threads run
+        while selective_processor.running:
+            time.sleep(0.1)
+            
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+    finally:
+        enhanced_processor.stop()
+        
+        # Print final recognition report
+        report = enhanced_processor.get_recognized_faces_report()
+        print("\nFinal Recognition Report:")
+        print(f"Total faces recognized: {report['total_recognized']}")
+        print(f"People in database: {report['database_size']}")
+
+
 
 class SelectiveFrameProcessor:
     """
-    A two-thread system for efficient frame capture with YOLO object detection
-    Now with integrated SavingDetection for alert frame saving
+    A two-thread system for efficient frame capture with YOLO object detection:
+    - Capture Thread: Continuously captures frames, keeping only the latest
+    - Processing Thread: Samples frames at fixed intervals for YOLO inference
+    Supports both camera devices and RTSP streams
     """
     
     def __init__(self, source=0, fps=30, processing_interval=0.5, is_rtsp=False, display_width=640, 
-                model_path=model_path,
-                conf_threshold=0.3, alert_classes_path=None, log_file="detection_log.csv",
-                bbox_label_config_path=None, audio_alert_url=None, 
-                enable_frame_saving=True, 
-                frame_save_dir="detected_alert_frames", frame_server_url=None,
-                custom_server_url=None, custom_server_interval=30.0,
-                custom_server_token=None, custom_server_id=None): 
+                 model_path="path/to/your/model.pt", conf_threshold=0.5):
         """
         Args:
             source: Camera device index (int) or RTSP URL (string)
@@ -560,32 +702,16 @@ class SelectiveFrameProcessor:
             display_width: Width for resizing display frame (maintains aspect ratio)
             model_path: Path to YOLO model weights (.pt file)
             conf_threshold: Confidence threshold for YOLO detections
-            alert_classes_path: Path to alert classes configuration file
-            enable_frame_saving: Boolean to enable/disable frame saving for alerts
-            frame_save_dir: Directory to save detected alert frames
-            frame_server_url: URL to send detected alert frames
         """
         self.source = source
         self.is_rtsp = is_rtsp
         self.processing_interval = processing_interval
         self.display_width = display_width
         self.conf_threshold = conf_threshold
-        self.enable_frame_saving = enable_frame_saving
-
-        # Initialize logging system
-        self.log_file = log_file
-        self._initialize_logging()
         
         # Initialize YOLO model
         self.model_path = model_path
         self.model = self._initialize_model()
-        
-        # Initialize alert system
-        self.alert_classes_path = alert_classes_path
-        self.alert_classes = self._initialize_alert_classes()
-        self.alert_cooldown = {}  # Track last alert time per class
-        self.alert_cooldown_duration = 5  # Seconds between alerts for same class
-        self.active_alerts = set()  # Currently triggered alert classes
         
         # Initialize capture based on source type
         if self.is_rtsp:
@@ -629,148 +755,7 @@ class SelectiveFrameProcessor:
         self.capture_failures = 0
         self.max_capture_failures = 10
         self.detection_count = 0
-
-        # Initialize custom bounding box labeling system
-        self.bbox_label_config_path = bbox_label_config_path
-        self.bbox_label_map = self._initialize_bbox_labeling()
         
-        # Initialize the audio alert system
-        self.audio_alert_url = audio_alert_url
-        self.audio_alert_manager = None
-        
-        if self.audio_alert_url:
-            self.audio_alert_manager = AudioAlertManager(self.audio_alert_url)
-            print(f"Audio alerts enabled for URL: {audio_alert_url}")
-
-        # Modified SavingDetection integration with smart custom server controls
-        if self.enable_frame_saving:
-            self.saving_detector = SavingDetectionThread(
-                save_dir=frame_save_dir,
-                server_url=frame_server_url,
-                custom_server_url=custom_server_url,
-                custom_server_min_interval=custom_server_interval,
-                custom_server_token=custom_server_token,  # NEW: Pass token
-                custom_server_id=custom_server_id         # NEW: Pass ID
-            )
-            self.saving_detector.start()
-            print("✅ SavingDetection integrated as storage service")
-            if custom_server_url:
-                print(f"🔗 Custom server upload enabled: {custom_server_url}")
-                print(f"⏰ Custom server upload interval: {custom_server_interval}s")
-                if custom_server_token and custom_server_id:
-                    print(f"🔑 Using token: {custom_server_token}, ID: {custom_server_id}")
-        else:
-            self.saving_detector = None
-
-    # Add this method to the SelectiveFrameProcessor class
-    def set_custom_server_upload_interval(self, interval):
-        """Dynamically change custom server upload interval"""
-        if self.saving_detector:
-            self.saving_detector.set_custom_server_interval(interval)
-        print(f"⏰ Custom server upload interval changed to {interval} seconds")
-                
-    def _initialize_bbox_labeling(self):
-        """
-        Initialize custom bounding box labeling system
-        Returns: dict with class_id -> {label, color, confidence_threshold}
-        """
-        bbox_label_map = {}
-        
-        if self.bbox_label_config_path and os.path.exists(self.bbox_label_config_path):
-            try:
-                with open(self.bbox_label_config_path, 'r') as f:
-                    for line_num, line in enumerate(f, 1):
-                        line = line.strip()
-                        if line and not line.startswith('#'):
-                            parts = line.split(':')
-                            if len(parts) == 4:
-                                class_id = int(parts[0].strip())
-                                display_label = parts[1].strip()
-                                color_str = parts[2].strip()
-                                conf_thresh = float(parts[3].strip())
-                                
-                                # Parse BGR color
-                                color_parts = color_str.split(',')
-                                if len(color_parts) == 3:
-                                    color = tuple(int(c) for c in color_parts)
-                                else:
-                                    color = (0, 255, 0)  # Default green
-                                
-                                bbox_label_map[class_id] = {
-                                    'label': display_label,
-                                    'color': color,
-                                    'confidence_threshold': conf_thresh
-                                }
-                                
-                                print(f"Custom bbox: Class {class_id} -> '{display_label}' {color} @ {conf_thresh}")
-                
-                print(f"Loaded {len(bbox_label_map)} custom bounding box labels")
-                
-            except Exception as e:
-                print(f"Error loading bbox label config: {e}")
-                print("Continuing with default bounding box labels")
-        else:
-            if self.bbox_label_config_path:
-                print(f"BBox label config not found: {self.bbox_label_config_path}")
-            print("Using default YOLO bounding box labels")
-        
-        return bbox_label_map        
-        
-    def _initialize_logging(self):
-        """Initialize logging system"""
-        try:
-            # Create log header if file doesn't exist
-            if not os.path.exists(self.log_file):
-                with open(self.log_file, 'w') as f:
-                    f.write("Timestamp,Frame_Number,Class_ID,Class_Name,Confidence,Alert_Triggered\n")
-            print(f"Logging enabled: {self.log_file}")
-        except Exception as e:
-            print(f"Log initialization warning: {e}")
-
-    def _log_detection(self, class_id, class_name, confidence, frame_num, is_alert=False):
-        """Log detection event to file"""
-        try:
-            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-            alert_flag = "YES" if is_alert else "NO"
-            
-            log_entry = f"{timestamp},{frame_num},{class_id},{class_name},{confidence:.3f},{alert_flag}\n"
-            
-            with open(self.log_file, 'a') as f:
-                f.write(log_entry)
-                
-        except Exception as e:
-            print(f"Logging error: {e}")  # Silent fail - don't break main functionality
-                    
-    def _initialize_alert_classes(self):
-        """Initialize alert classes from configuration file"""
-        alert_classes = {}
-        
-        if self.alert_classes_path and os.path.exists(self.alert_classes_path):
-            try:
-                with open(self.alert_classes_path, 'r') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith('#'):
-                            parts = line.split(':')
-                            if len(parts) == 2:
-                                class_id = int(parts[0].strip())
-                                class_name = parts[1].strip()
-                                alert_classes[class_id] = class_name
-                
-                print(f"Loaded {len(alert_classes)} alert classes from {self.alert_classes_path}")
-                for class_id, class_name in alert_classes.items():
-                    print(f"  - Class {class_id}: {class_name}")
-                    
-            except Exception as e:
-                print(f"Error loading alert classes: {e}")
-                print("Continuing without alert classes")
-        else:
-            print("No alert classes configuration file provided. Alerts disabled.")
-            if self.alert_classes_path:
-                print(f"Alert classes path was: {self.alert_classes_path}")
-        
-        return alert_classes
-    
     def _initialize_model(self):
         """Initialize YOLO model with error handling"""
         try:
@@ -781,9 +766,9 @@ class SelectiveFrameProcessor:
                 print(f"Warning: Model path '{self.model_path}' does not exist.")
                 print("Please update the 'model_path' parameter with your actual model path.")
                 print("For now, using a pretrained YOLO11n model as placeholder.")
-                model = YOLO("yolo11n.pt")  # Fallback to pretrained model
+                model = YOLO("yolo11n.pt")  # Fallback to pretrained model:cite[1]
             else:
-                model = YOLO(self.model_path)  # Load your custom model
+                model = YOLO(self.model_path)  # Load your custom model:cite[1]
             
             print(f"YOLO model loaded successfully: {model.__class__.__name__}")
             return model
@@ -791,157 +776,7 @@ class SelectiveFrameProcessor:
         except Exception as e:
             print(f"Error loading YOLO model: {e}")
             print("Falling back to pretrained YOLO11n model")
-            return YOLO("yolo11n.pt")  # Ultimate fallback
-
-    def _check_alerts(self, results, frame_num):
-        current_time = time.time()
-        newly_triggered = set()
-        
-        # Clear expired alerts
-        expired_alerts = []
-        for class_id, last_alert in self.alert_cooldown.items():
-            if current_time - last_alert > self.alert_cooldown_duration:
-                expired_alerts.append(class_id)
-        
-        for class_id in expired_alerts:
-            if class_id in self.active_alerts:
-                self.active_alerts.remove(class_id)
-        
-        if results and len(results) > 0 and results[0].boxes:
-            for box in results[0].boxes:
-                class_id = int(box.cls.item())
-                confidence = box.conf.item()
-                
-                # Get class name from model names
-                class_name = "unknown"
-                if hasattr(self.model, 'names') and self.model.names:
-                    class_name = self.model.names.get(class_id, f"class_{class_id}")
-                else:
-                    class_name = f"class_{class_id}"
-                
-                # Log ALL detections (not just alert classes)
-                self._log_detection(class_id, class_name, confidence, frame_num, is_alert=False)
-                
-                # Check if this class is in our alert classes
-                if class_id in self.alert_classes:
-                    alert_class_name = self.alert_classes[class_id]  # Define it HERE, at the outer level
-                    
-                    # Check cooldown for this class
-                    last_alert = self.alert_cooldown.get(class_id, 0)
-                    if current_time - last_alert >= self.alert_cooldown_duration:
-                        # Trigger alert
-                        newly_triggered.add(class_id)
-                        self.alert_cooldown[class_id] = current_time
-                        
-                        # Log the alert
-                        self._log_detection(class_id, alert_class_name, confidence, frame_num, is_alert=True)
-                        
-                        print(f"🚨 ALERT: {alert_class_name} (Confidence: {confidence:.2f})")
-                    
-                    # CONDITIONAL AUDIO ALERT TRIGGER - NOW alert_class_name IS ALWAYS DEFINED
-                    if self.audio_alert_manager and self.audio_alert_url:
-                        # Trigger audio alert in separate thread
-                        self.audio_alert_manager.trigger_alert(alert_class_name, confidence)
-            
-            #   Update active alerts without clearing previous ones
-            self.active_alerts.update(newly_triggered)
-            
-            # Clear alerts that are no longer active (after their cooldown)
-            still_active = set()
-            for class_id in self.active_alerts:
-                last_alert = self.alert_cooldown.get(class_id, 0)
-                if current_time - last_alert < self.alert_cooldown_duration:
-                    still_active.add(class_id)
-            self.active_alerts = still_active
-
-    def _run_yolo_detection(self, frame, frame_num):
-        """Run YOLO object detection with enhanced error handling"""
-        try:
-            # Validate input frame
-            if frame is None or frame.size == 0:
-                print("Warning: Empty frame passed to YOLO detection")
-                return frame, 0
-                
-            # Run YOLO inference
-            results = self.model.predict(
-                source=frame,
-                conf=self.conf_threshold,
-                verbose=False
-            )
-            
-            # Check for alerts
-            self._check_alerts(results, frame_num)
-            
-            alert_triggered_classes = set()
-            detected_objects = []
-        
-            if results and len(results) > 0 and results[0].boxes:
-                for box in results[0].boxes:
-                    class_id = int(box.cls.item())
-                    confidence = box.conf.item()
-                
-                    # Store detection info
-                    detected_objects.append({
-                        'class_id': class_id,
-                        'confidence': confidence,
-                        'bbox': box.xyxy[0].tolist()
-                    })
-                
-                    # Check for alerts
-                    if class_id in self.alert_classes:
-                        alert_triggered_classes.add(class_id)
-        
-            # Process frame with custom bounding boxes
-            if results and len(results) > 0:
-                annotated_frame = self._draw_custom_bounding_boxes(frame, results)
-                return annotated_frame, detected_objects, alert_triggered_classes
-        
-            return frame, detected_objects, alert_triggered_classes
-        
-        except Exception as e:
-            print(f"YOLO inference error: {e}")
-            return frame, [], set()
-
-        
-    def _add_info_overlay(self, frame, frame_num, processed_count, detections_count):
-        """Add informational text overlay to the frame with YOLO-specific info"""
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        source_type = "RTSP" if self.is_rtsp else "Camera"
-        
-        # Scale font size based on display width
-        font_scale = 0.5 if self.display_width <= 640 else 0.7
-        thickness = 1 if self.display_width <= 640 else 2
-        
-        # Add different colored text for better visibility
-        cv.putText(frame, f"Source: {source_type}", (10, 25), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 255), thickness)
-        cv.putText(frame, f"Frame: {frame_num}", (10, 45), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0), thickness)
-        cv.putText(frame, f"Processed: {processed_count}", (10, 65), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 0), thickness)
-        cv.putText(frame, f"Detections: {detections_count}", (10, 85), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
-        cv.putText(frame, f"Total Detections: {self.detection_count}", (10, 105), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
-        
-        # Add alert status
-        alert_status = f"Active Alerts: {len(self.active_alerts)}"
-        alert_color = (0, 0, 255) if self.active_alerts else (0, 255, 0)
-        cv.putText(frame, alert_status, (10, 125), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale, alert_color, thickness)
-        
-        # Add alert classes if any are active
-        if self.active_alerts:
-            alert_text = "Alerts: " + ", ".join([self.alert_classes[class_id] for class_id in self.active_alerts])
-            cv.putText(frame, alert_text, (10, 145), 
-                      cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (0, 0, 255), 1)
-        
-        cv.putText(frame, f"Time: {timestamp}", (10, 160), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
-        cv.putText(frame, f"Interval: {self.processing_interval}s", (10, 175), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
-        cv.putText(frame, "Press ESC to exit", (10, 190), 
-                  cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
+            return YOLO("yolo11n.pt")  # Ultimate fallback:cite[1]
     
     def start(self):
         """Start both capture and processing threads"""
@@ -966,31 +801,21 @@ class SelectiveFrameProcessor:
         print(f"  - Confidence threshold: {self.conf_threshold}")
         
     def stop(self):
-        """Enhanced cleanup"""
+        """Stop both threads and release resources"""
         self.running = False
         
-        # Stop SavingDetection thread if enabled
-        if self.enable_frame_saving and self.saving_detector:
-            self.saving_detector.stop()
-        
-        # Proper thread termination
-        if self.capture_thread:
-            self.capture_thread.join(timeout=1.0)
-        if self.processing_thread:
-            self.processing_thread.join(timeout=1.0)
-        
-        # Force cleanup if threads hang
         if self.capture_thread and self.capture_thread.is_alive():
-            print("Warning: Capture thread did not terminate cleanly")
+            self.capture_thread.join(timeout=2.0)
+            
         if self.processing_thread and self.processing_thread.is_alive():
-            print("Warning: Processing thread did not terminate cleanly")
-        
+            self.processing_thread.join(timeout=2.0)
+            
         self.capture.release()
         cv.destroyAllWindows()
         print(f"Stopped SelectiveFrameProcessor. Total detections: {self.detection_count}")
-            
+        
     def _capture_loop(self):
-        """Enhanced capture loop with frame validation"""
+        """Continuously capture frames, keeping only the latest"""
         source_type = "RTSP" if self.is_rtsp else "camera"
         print(f"Capture thread started - continuously capturing frames from {source_type}")
         frames_captured = 0
@@ -998,18 +823,15 @@ class SelectiveFrameProcessor:
         
         while self.running:
             ret, frame = self.capture.read()
-            if not ret or frame is None:
+            if not ret:
                 self.capture_failures += 1
                 print(f"Warning: Failed to capture frame from {source_type} (failure #{self.capture_failures})")
                 
-                # Enhanced reconnection logic
+                # For RTSP, try to reconnect after multiple failures
                 if self.is_rtsp and self.capture_failures >= self.max_capture_failures:
-                    print("Multiple RTSP capture failures - attempting enhanced reconnection...")
-                    if self._reconnect_rtsp():
-                        continue  # Successfully reconnected
-                    else:
-                        print("Reconnection failed, continuing with existing connection")
-                        self.capture_failures = 0  # Reset to prevent spam
+                    print("Multiple RTSP capture failures - attempting reconnection...")
+                    self._reconnect_rtsp()
+                    self.capture_failures = 0
                 else:
                     time.sleep(0.1)
                 continue
@@ -1018,110 +840,155 @@ class SelectiveFrameProcessor:
             self.capture_failures = 0
             frames_captured += 1
             
-            # Validate frame dimensions
-            if frame.shape[0] <= 0 or frame.shape[1] <= 0:
-                print("Warning: Invalid frame dimensions, skipping...")
-                continue
-            
-            # Store only the latest frame with proper locking
+            # Store only the latest frame
             with self.lock:
                 self.latest_frame = frame.copy() if frame is not None else None
                 self.frame_counter = frames_captured
                 
         print(f"Capture thread stopped. Total frames captured: {frames_captured}")
-            
+        
     def _reconnect_rtsp(self):
-        """Enhanced RTSP reconnection with better error handling"""
-        print("Attempting enhanced RTSP reconnection...")
+        """Attempt to reconnect to RTSP stream"""
+        print("Attempting RTSP reconnection...")
+        self.capture.release()
+        time.sleep(2)
         
+        self.capture = cv.VideoCapture(self.source)
+        self.capture.set(cv.CAP_PROP_BUFFERSIZE, 1)
+        self.capture.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc(*'H264'))
+        
+        if self.capture.isOpened():
+            print("RTSP reconnection successful")
+        else:
+            print("RTSP reconnection failed")
+        
+    def _run_yolo_detection(self, frame):
+        """Run YOLO object detection with custom bbox handling"""
         try:
-            # Release old connection
-            if self.capture.isOpened():
-                self.capture.release()
+            results = self.model.predict(
+                source=frame,
+                conf=self.conf_threshold,
+                verbose=False
+            )
             
-            # Wait before reconnect
-            time.sleep(2)
-            
-            # Reinitialize with same parameters
-            self.capture = cv.VideoCapture(self.source)
-            self.capture.set(cv.CAP_PROP_BUFFERSIZE, 1)
-            self.capture.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc(*'H264'))
-            
-            # Test the connection
-            if self.capture.isOpened():
-                ret, test_frame = self.capture.read()
-                if ret and test_frame is not None:
-                    print("✅ RTSP reconnection successful")
-                    self.capture_failures = 0
-                    return True
-                else:
-                    print("❌ RTSP reconnected but failed to read frame")
-            else:
-                print("❌ RTSP reconnection failed - cannot open stream")
+            if results and len(results) > 0:
+                # Access raw detection data
+                result = results[0]
+                annotated_frame = frame.copy()
                 
+                if result.boxes is not None:
+                    # Get all detection information
+                    boxes = result.boxes.xyxy.cpu().numpy()  # Bounding boxes [x1, y1, x2, y2]
+                    confidences = result.boxes.conf.cpu().numpy()  # Confidence scores
+                    class_ids = result.boxes.cls.cpu().numpy().astype(int)  # Class IDs
+                    class_names = result.names  # Dictionary mapping class_id to class name
+                    
+                    # Process each detection individually
+                    for i, (box, conf, cls_id) in enumerate(zip(boxes, confidences, class_ids)):
+                        x1, y1, x2, y2 = box
+                        class_name = class_names[cls_id]
+                        
+                        # Custom bbox drawing (example)
+                        color = self._get_color_for_class(cls_id)
+                        cv.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+                        
+                        # Custom label
+                        label = f"{class_name} {conf:.2f}"
+                        cv.putText(annotated_frame, label, (int(x1), int(y1)-10), 
+                                cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                    
+                    self.detection_count += len(boxes)
+                    return annotated_frame, len(boxes)
+                
+            return frame, 0
+            
         except Exception as e:
-            print(f"❌ RTSP reconnection error: {e}")
-        
-        return False
+            print(f"YOLO inference error: {e}")
+            return frame, 0
 
+    def _get_color_for_class(self, class_id):
+        """Generate consistent color for each class"""
+        colors = [(0,255,0), (255,0,0), (0,0,255), (255,255,0), (255,0,255), (0,255,255)]
+        return colors[class_id % len(colors)]   
+   
+        
     def _processing_loop(self):
-        """Optimized processing loop with coordinated frame saving"""
-        print("Processing thread started with coordinated frame saving")
+        """Run YOLO detection on frames at fixed time intervals"""
+        print("YOLO processing thread started - sampling frames at fixed intervals")
         frames_processed = 0
         last_processing_time = time.time()
-    
+        
         while self.running:
             current_time = time.time()
             elapsed = current_time - last_processing_time
-        
+            
             if elapsed >= self.processing_interval:
                 frame_to_process = None
                 frame_num = 0
-            
+                
                 with self.lock:
                     if self.latest_frame is not None:
                         frame_to_process = self.latest_frame.copy()
                         frame_num = self.frame_counter
-            
+                
                 if frame_to_process is not None:
                     frames_processed += 1
+                    
+                    # Run YOLO object detection
+                    processed_frame, detections = self._run_yolo_detection(frame_to_process)
+                    
+                    # Resize frame to smaller display size
+                    resized_frame = self._resize_frame(processed_frame)
+                    
+                    # Add informational overlay with detection info
+                    self._add_info_overlay(resized_frame, frame_num, frames_processed, detections)
+                    
+                    # Display the resized frame with detections
+                    cv.imshow("YOLO Object Detection - Selective Processing", resized_frame)
+                    
+                    # Handle key presses - only ESC for exit
+                    key = cv.waitKey(1) & 0xFF
+                    if key == 27:  # ESC key
+                        self.running = False
+                        break
                 
-                    # Run YOLO detection for display
-                    processed_frame, detections, alert_triggered_classes = self._run_yolo_detection(frame_to_process, frame_num)
-                
-                    # Display results
-                    if processed_frame is not None:
-                        resized_frame = self._resize_frame(processed_frame)
-                        self._add_info_overlay(resized_frame, frame_num, frames_processed, len(detections))
-                    
-                        # ✅ CRITICAL: Save the DISPLAYED frame (with overlays) if alerts detected
-                        if (self.enable_frame_saving and self.saving_detector and 
-                            alert_triggered_classes and processed_frame is not None):
-                        
-                            # Use the resized_frame (what user sees) for saving
-                            self.saving_detector.save_frame(
-                                frame=resized_frame,  # The displayed frame with overlays
-                                frame_num=frame_num,
-                                timestamp=current_time,
-                                detected_objects=detections,
-                                alert_classes=alert_triggered_classes
-                            )
-                    
-                        cv2.imshow("YOLO Detection with Frame Saving", resized_frame)
-                    
-                        key = cv2.waitKey(1) & 0xFF
-                        if key == 27:
-                            self.running = False
-                            break
-            
                 last_processing_time = current_time
-            
+                
             time.sleep(0.001)
-        
+                
+        print(f"YOLO processing thread stopped. Total frames processed: {frames_processed}")
+    
     def _resize_frame(self, frame):
         """Resize frame to display dimensions maintaining aspect ratio"""
         return cv.resize(frame, (self.display_width, self.display_height))
-     
+    
+    def _add_info_overlay(self, frame, frame_num, processed_count, detections_count):
+        """Add informational text overlay to the frame with YOLO-specific info"""
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        source_type = "RTSP" if self.is_rtsp else "Camera"
+        
+        # Scale font size based on display width
+        font_scale = 0.5 if self.display_width <= 640 else 0.7
+        thickness = 1 if self.display_width <= 640 else 2
+        
+        # Add different colored text for better visibility
+        cv.putText(frame, f"Source: {source_type}", (10, 25), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 255), thickness)
+        cv.putText(frame, f"Frame: {frame_num}", (10, 45), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 0), thickness)
+        cv.putText(frame, f"Processed: {processed_count}", (10, 65), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 0), thickness)
+        cv.putText(frame, f"Detections: {detections_count}", (10, 85), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
+        cv.putText(frame, f"Total Detections: {self.detection_count}", (10, 105), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
+        cv.putText(frame, f"Time: {timestamp}", (10, 125), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
+        cv.putText(frame, f"Interval: {self.processing_interval}s", (10, 140), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
+        cv.putText(frame, "Press ESC to exit", (10, 155), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
+    
     def set_processing_interval(self, interval):
         """Dynamically change the processing interval"""
         self.processing_interval = max(0.01, interval)
@@ -1151,133 +1018,6 @@ class SelectiveFrameProcessor:
             'total_detections': self.detection_count
         }
 
-    def set_alert_cooldown(self, cooldown_seconds):
-        """Dynamically change alert cooldown duration"""
-        self.alert_cooldown_duration = max(1, cooldown_seconds)
-        print(f"Alert cooldown changed to {self.alert_cooldown_duration} seconds")
-    
-    def reload_alert_classes(self, new_alert_classes_path=None):
-        """Reload alert classes from configuration file"""
-        if new_alert_classes_path:
-            self.alert_classes_path = new_alert_classes_path
-        
-        self.alert_classes = self._initialize_alert_classes()
-        self.alert_cooldown.clear()
-        self.active_alerts.clear()
-        print("Alert classes reloaded")
-
-    def _draw_custom_bounding_boxes(self, frame, results):
-        """
-        Draw custom bounding boxes with personalized labels and colors
-        NOW ONLY DISPLAYS CLASSES THAT ARE IN ALERT_CLASSES.TXT
-        Returns: annotated frame
-        """
-        if not results or len(results) == 0 or not results[0].boxes:
-            return frame
-        
-        annotated_frame = frame.copy()
-        boxes = results[0].boxes
-        
-        for box in boxes:
-            class_id = int(box.cls.item())
-            confidence = box.conf.item()
-            
-            # ONLY display if this class is in alert_classes
-            if class_id not in self.alert_classes:
-                continue  # Skip classes not in alert_classes.txt
-            
-            # Get original coordinates
-            x1, y1, x2, y2 = box.xyxy[0].tolist()
-            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-            
-            # Determine label, color, and whether to display
-            display_label, box_color, should_display = self._get_bbox_display_properties(class_id, confidence)
-            
-            if should_display:
-                # Draw bounding box
-                thickness = 2
-                cv.rectangle(annotated_frame, (x1, y1), (x2, y2), box_color, thickness)
-                
-                # Draw label background
-                label = f"{display_label} {confidence:.2f}"
-                label_size = cv.getTextSize(label, cv.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
-                
-                # Label background rectangle
-                cv.rectangle(annotated_frame, (x1, y1 - label_size[1] - 10), 
-                             (x1 + label_size[0], y1), box_color, -1)
-                
-                # Label text
-                cv.putText(annotated_frame, label, (x1, y1 - 5), 
-                           cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-                
-                # Additional visual indicators for high-confidence detections
-                if confidence > 0.8:
-                    # Draw corner markers
-                    marker_length = 15
-                    # Top-left corner
-                    cv.line(annotated_frame, (x1, y1), (x1 + marker_length, y1), box_color, 3)
-                    cv.line(annotated_frame, (x1, y1), (x1, y1 + marker_length), box_color, 3)
-                    # Top-right corner  
-                    cv.line(annotated_frame, (x2, y1), (x2 - marker_length, y1), box_color, 3)
-                    cv.line(annotated_frame, (x2, y1), (x2, y1 + marker_length), box_color, 3)
-                    # Bottom-left corner
-                    cv.line(annotated_frame, (x1, y2), (x1 + marker_length, y2), box_color, 3)
-                    cv.line(annotated_frame, (x1, y2), (x1, y2 - marker_length), box_color, 3)
-                    # Bottom-right corner
-                    cv.line(annotated_frame, (x2, y2), (x2 - marker_length, y2), box_color, 3)
-                    cv.line(annotated_frame, (x2, y2), (x2, y2 - marker_length), box_color, 3)
-        
-        return annotated_frame
-    
-    def _get_bbox_display_properties(self, class_id, confidence):
-        """
-        Determine display properties for a bounding box based on custom configuration
-        NOW ONLY PROCESSES CLASSES THAT ARE IN ALERT_CLASSES.TXT
-        Returns: (label, color, should_display)
-        """
-        # Only display if class is in alert_classes
-        if class_id not in self.alert_classes:
-            return "", (0, 0, 0), False
-        
-        # Check if we have custom configuration for this class
-        if class_id in self.bbox_label_map:
-            config = self.bbox_label_map[class_id]
-            # Check confidence threshold
-            if confidence >= config['confidence_threshold']:
-                return config['label'], config['color'], True
-            else:
-                return "", (0, 0, 0), False  # Don't display if below threshold
-        
-        # Default behavior - use alert class name and default color
-        alert_class_name = self.alert_classes.get(class_id, f"class_{class_id}")
-        # Use color based on class_id for variety
-        colors = [(0, 255, 0), (255, 0, 0), (0, 0, 255), (255, 255, 0), 
-                 (255, 0, 255), (0, 255, 255), (128, 0, 128)]
-        color = colors[class_id % len(colors)]
-        return alert_class_name, color, True
-
-    def reload_bbox_labels(self, new_config_path=None):
-        """Reload custom bounding box label configuration"""
-        if new_config_path:
-            self.bbox_label_config_path = new_config_path
-        
-        self.bbox_label_map = self._initialize_bbox_labeling()
-        print("Bounding box labels reloaded")
-    
-    def add_custom_bbox_label(self, class_id, display_label, color=(0, 255, 0), confidence_threshold=0.5):
-        """Dynamically add a custom bounding box label"""
-        self.bbox_label_map[class_id] = {
-            'label': display_label,
-            'color': color,
-            'confidence_threshold': confidence_threshold
-        }
-        print(f"Added custom bbox: Class {class_id} -> '{display_label}'")
-    
-    def remove_custom_bbox_label(self, class_id):
-        """Remove a custom bounding box label"""
-        if class_id in self.bbox_label_map:
-            del self.bbox_label_map[class_id]
-            print(f"Removed custom bbox label for class {class_id}")
 
 def main():
     """
@@ -1287,24 +1027,17 @@ def main():
     print("=" * 60)
     print("Features:")
     print("- Camera & RTSP support")
-    print("- Multi-threaded architecture") 
+    print("- Multi-threaded architecture")
     print("- Selective frame sampling for CPU efficiency")
     print("- YOLO object detection integration")
-    print("- Class-based alert system")
     print("- Resizable display output")
-    print("- Alert class with file input")
-    print("- Logging for alerted classes")        
     print("- Real-time performance monitoring")
-    print("- Custom server upload with media2[] parameter and smart deduplication")
     print("\nControls:")
     print("  ESC: Exit")
     print("=" * 60)
-
-
     
     # Choose source type
     while True:
-
         choice = input("Choose source type:\n1. Camera\n2. RTSP Stream\nEnter choice (1 or 2): ").strip()
         
         if choice == '1':
@@ -1312,70 +1045,20 @@ def main():
             display_width = int(input("Enter display width (default 640): ") or "640")
             processing_interval = float(input("Enter processing interval in seconds (default 0.5): ") or "0.5")
             model_path = input("Enter YOLO model path (or press Enter for pretrained model): ").strip()
-            alert_classes_path = input("Enter alert classes config file path (or press Enter to skip): ").strip()
-            bbox_label_config_path = input("Enter custom bbox label config file path (or press Enter to skip): ").strip()
-
-            if not bbox_label_config_path:
-                bbox_label_config_path = None
-                print("Using default bounding box labels")
-            else:
-                print(f"Using custom bbox labels from: {bbox_label_config_path}")
-                
-            audio_alert_url = input("Enter audio alert URL (or press Enter to disable): ").strip()
-            if not audio_alert_url:
-                audio_alert_url = None
-                print("Audio alerts disabled")
-            else:
-                print(f"Audio alerts enabled for: {audio_alert_url}")
-
-            # FIXED: Ask for custom server URL FIRST
-            custom_server_url = input("Enter custom server URL for media2[] upload (or press Enter to disable): ").strip()
-            if not custom_server_url:
-                custom_server_url = None
-                print("Custom server upload disabled")
-            else:
-                print(f"Custom server upload enabled: {custom_server_url}")
-        
-                if not custom_server_token or not custom_server_id:
-                    print("⚠️ Warning: Token and ID are required for custom server upload")
-                    use_custom_server = input("Continue without token and ID? (y/n): ").strip().lower()
-                    if use_custom_server != 'y':
-                        custom_server_url = None
-                        print("Custom server upload disabled due to missing credentials")
-                    else:
-                        print("⚠️ Proceeding without token and ID - server may reject requests")
-
-                # FIXED: Only ask for interval if custom server is enabled
-                custom_server_interval = 30.0  # Default value
-                try:
-                    interval_input = input("Enter custom server upload interval in seconds (default 30.0): ").strip()
-                    if interval_input:
-                        custom_server_interval = float(interval_input)
-                    print(f"Custom server upload interval set to: {custom_server_interval}s")
-                except ValueError:
-                    print("Invalid interval, using default 30.0 seconds")
             
             if not model_path:
-                model_path = "yolo11n.pt"
+                model_path = "yolo11n-pose.pt"  # Use pretrained model as placeholder:cite[1]
                 print("Using pretrained YOLO11n model")
             
             processor = SelectiveFrameProcessor(
-                source=camera_index,  
+                source=camera_index,
                 fps=30,
                 processing_interval=processing_interval,
-                is_rtsp=False,  
+                is_rtsp=False,
                 display_width=display_width,
-                model_path=model_path,
-                alert_classes_path=alert_classes_path,
-                bbox_label_config_path=bbox_label_config_path,
-                audio_alert_url=audio_alert_url,
-                custom_server_url=custom_server_url,
-                #custom_server_interval=custom_server_interval,
-                custom_server_token=custom_server_token,  # NEW: Pass token
-                custom_server_id=custom_server_id         # NEW: Pass ID
+                model_path=model_path
             )
             break
-        
         elif choice == '2':
             rtsp_url = input("Enter RTSP URL: ").strip()
             if not rtsp_url:
@@ -1385,67 +1068,17 @@ def main():
             display_width = int(input("Enter display width (default 640): ") or "640")
             processing_interval = float(input("Enter processing interval in seconds (default 1.0): ") or "1.0")
             model_path = input("Enter YOLO model path (or press Enter for pretrained model): ").strip()
-            alert_classes_path = input("Enter alert classes config file path (or press Enter to skip): ").strip()
-            bbox_label_config_path = input("Enter custom bbox label config file path (or press Enter to skip): ").strip()
-
-            if not bbox_label_config_path:
-                bbox_label_config_path = None
-                print("Using default bounding box labels")
-            else:
-                print(f"Using custom bbox labels from: {bbox_label_config_path}")
-
-            audio_alert_url = input("Enter audio alert URL (or press Enter to disable): ").strip()
-            if not audio_alert_url:
-                audio_alert_url = None
-                print("Audio alerts disabled")
-            else:
-                print(f"Audio alerts enabled for: {audio_alert_url}")
             
-            # FIXED: Ask for custom server URL FIRST
-            custom_server_url = input("Enter custom server URL for media2[] upload (or press Enter to disable): ").strip()
-            if not custom_server_url:
-                custom_server_url = None
-                print("Custom server upload disabled")
-            else:
-                print(f"Custom server upload enabled: {custom_server_url}")
-        
-                if not custom_server_token or not custom_server_id:
-                    print("⚠️ Warning: Token and ID are required for custom server upload")
-                    use_custom_server = input("Continue without token and ID? (y/n): ").strip().lower()
-                    if use_custom_server != 'y':
-                        custom_server_url = None
-                        print("Custom server upload disabled due to missing credentials")
-                    else:
-                        print("⚠️ Proceeding without token and ID - server may reject requests")
-
-                # FIXED: Only ask for interval if custom server is enabled
-                custom_server_interval = 30.0  # Default value
-                try:
-                    interval_input = input("Enter custom server upload interval in seconds (default 30.0): ").strip()
-                    if interval_input:
-                        custom_server_interval = float(interval_input)
-                    print(f"Custom server upload interval set to: {custom_server_interval}s")
-                except ValueError:
-                    print("Invalid interval, using default 30.0 seconds")
-                            
             if not model_path:
-                model_path = "yolo11n.pt"
+                model_path = "yolo11n.pt"  # Use pretrained model as placeholder:cite[1]
                 print("Using pretrained YOLO11n model")
             
             processor = SelectiveFrameProcessor(
-                source=rtsp_url,  
-                fps=30,
+                source=rtsp_url,
                 processing_interval=processing_interval,
-                is_rtsp=False,  
+                is_rtsp=True,
                 display_width=display_width,
-                model_path=model_path,
-                alert_classes_path=alert_classes_path,
-                bbox_label_config_path=bbox_label_config_path,
-                audio_alert_url=audio_alert_url,
-                custom_server_url=custom_server_url,
-                #custom_server_interval=custom_server_interval,
-                custom_server_token=custom_server_token,  # NEW: Pass token
-                custom_server_id=custom_server_id         # NEW: Pass ID
+                model_path=model_path
             )
             break
         else:
@@ -1459,13 +1092,16 @@ def main():
             time.sleep(0.1)
             
     except KeyboardInterrupt:
-        print("\n🛑 Keyboard interrupt received - initiating graceful shutdown...")
-    except Exception as e:
-        print(f"\n❌ Unexpected error: {e}")
-        print("Initiating emergency shutdown...")
+        print("\nInterrupted by user")
     finally:
-        print("Cleaning up resources...")
         processor.stop()
 
+
 if __name__ == '__main__':
-    main()
+    # You can choose which version to run
+    choice = input("Run (1) Basic detection or (2) Enhanced face recognition? ")
+    
+    if choice == '2':
+        main_enhanced()
+    else:
+        main()  # Original version
