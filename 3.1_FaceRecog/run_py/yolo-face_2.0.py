@@ -9,17 +9,20 @@ import numpy as np
 import cv2 as cv
 from pathlib import Path
 from ultralytics import YOLO
+import queue
 
+model_path=r"D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\yolov11n-face.pt"
 class SelectiveFrameProcessor:
     """
-    A two-thread system for efficient frame capture with YOLO object detection:
+    A three-thread system for efficient frame capture with YOLO object detection:
     - Capture Thread: Continuously captures frames, keeping only the latest
-    - Processing Thread: Samples frames at fixed intervals for YOLO inference
+    - Processing Thread: Samples frames at fixed intervals for YOLO inference  
+    - Cropping Thread: Receives detection results and extracts cropped images
     Supports both camera devices and RTSP streams
     """
     
     def __init__(self, source=0, fps=30, processing_interval=0.5, is_rtsp=False, display_width=640, 
-                 model_path="path/to/your/model.pt", conf_threshold=0.5):
+                 model_path=model_path, conf_threshold=0.5, save_crops=True, crop_output_dir="cropped_faces"):
         """
         Args:
             source: Camera device index (int) or RTSP URL (string)
@@ -29,12 +32,21 @@ class SelectiveFrameProcessor:
             display_width: Width for resizing display frame (maintains aspect ratio)
             model_path: Path to YOLO model weights (.pt file)
             conf_threshold: Confidence threshold for YOLO detections
+            save_crops: Whether to save cropped face images to disk
+            crop_output_dir: Directory to save cropped face images
         """
         self.source = source
         self.is_rtsp = is_rtsp
         self.processing_interval = processing_interval
         self.display_width = display_width
         self.conf_threshold = conf_threshold
+        self.save_crops = save_crops
+        self.crop_output_dir = crop_output_dir
+        
+        # Create output directory for cropped faces
+        if self.save_crops:
+            os.makedirs(self.crop_output_dir, exist_ok=True)
+            print(f"Cropped faces will be saved to: {self.crop_output_dir}")
         
         # Initialize YOLO model
         self.model_path = model_path
@@ -74,14 +86,19 @@ class SelectiveFrameProcessor:
         self.frame_counter = 0
         self.running = False
         
+        # Queue for passing detection results to cropping thread
+        self.crop_queue = queue.Queue(maxsize=100)
+        
         # Threads
         self.capture_thread = None
         self.processing_thread = None
+        self.cropping_thread = None
         
         # Performance monitoring
         self.capture_failures = 0
         self.max_capture_failures = 10
         self.detection_count = 0
+        self.crop_count = 0
         
     def _initialize_model(self):
         """Initialize YOLO model with error handling"""
@@ -92,21 +109,21 @@ class SelectiveFrameProcessor:
             if not placeholder_path.exists():
                 print(f"Warning: Model path '{self.model_path}' does not exist.")
                 print("Please update the 'model_path' parameter with your actual model path.")
-                print("For now, using a pretrained YOLO11n model as placeholder.")
-                model = YOLO("yolo11n.pt")  # Fallback to pretrained model:cite[1]
+                print("For now, using a pretrained YOLO11n-face model as placeholder.")
+                model = YOLO("yolo11n-face.pt")  # Fallback to face detection model
             else:
-                model = YOLO(self.model_path)  # Load your custom model:cite[1]
+                model = YOLO(self.model_path)  # Load your custom model
             
             print(f"YOLO model loaded successfully: {model.__class__.__name__}")
             return model
             
         except Exception as e:
             print(f"Error loading YOLO model: {e}")
-            print("Falling back to pretrained YOLO11n model")
-            return YOLO("yolo11n.pt")  # Ultimate fallback:cite[1]
+            print("Falling back to pretrained YOLO11n-face model")
+            return YOLO("yolo11n-face.pt")  # Ultimate fallback
     
     def start(self):
-        """Start both capture and processing threads"""
+        """Start capture, processing, and cropping threads"""
         self.running = True
         
         # Start capture thread
@@ -119,16 +136,24 @@ class SelectiveFrameProcessor:
         self.processing_thread.daemon = True
         self.processing_thread.start()
         
+        # Start cropping thread
+        self.cropping_thread = threading.Thread(target=self._cropping_loop, name="CroppingThread")
+        self.cropping_thread.daemon = True
+        self.cropping_thread.start()
+        
         source_type = "RTSP stream" if self.is_rtsp else "camera"
-        print(f"Started SelectiveFrameProcessor with YOLO:")
+        print(f"Started SelectiveFrameProcessor with YOLO Face Detection:")
         print(f"  - Source: {source_type} ({self.source})")
         print(f"  - Capture: Continuous")
         print(f"  - YOLO Processing: Every {self.processing_interval} seconds")
+        print(f"  - Face Cropping: Active")
         print(f"  - Display size: {self.display_width}x{self.display_height}")
         print(f"  - Confidence threshold: {self.conf_threshold}")
+        if self.save_crops:
+            print(f"  - Saving crops to: {self.crop_output_dir}")
         
     def stop(self):
-        """Stop both threads and release resources"""
+        """Stop all threads and release resources"""
         self.running = False
         
         if self.capture_thread and self.capture_thread.is_alive():
@@ -137,9 +162,12 @@ class SelectiveFrameProcessor:
         if self.processing_thread and self.processing_thread.is_alive():
             self.processing_thread.join(timeout=2.0)
             
+        if self.cropping_thread and self.cropping_thread.is_alive():
+            self.cropping_thread.join(timeout=2.0)
+            
         self.capture.release()
         cv.destroyAllWindows()
-        print(f"Stopped SelectiveFrameProcessor. Total detections: {self.detection_count}")
+        print(f"Stopped SelectiveFrameProcessor. Total detections: {self.detection_count}, Cropped faces: {self.crop_count}")
         
     def _capture_loop(self):
         """Continuously capture frames, keeping only the latest"""
@@ -190,7 +218,7 @@ class SelectiveFrameProcessor:
             print("RTSP reconnection failed")
         
     def _run_yolo_detection(self, frame):
-        """Run YOLO object detection with custom bbox handling"""
+        """Run YOLO face detection and return annotated frame + detection data"""
         try:
             results = self.model.predict(
                 source=frame,
@@ -199,9 +227,9 @@ class SelectiveFrameProcessor:
             )
             
             if results and len(results) > 0:
-                # Access raw detection data
                 result = results[0]
                 annotated_frame = frame.copy()
+                detection_data = []
                 
                 if result.boxes is not None:
                     # Get all detection information
@@ -215,7 +243,15 @@ class SelectiveFrameProcessor:
                         x1, y1, x2, y2 = box
                         class_name = class_names[cls_id]
                         
-                        # Custom bbox drawing (example)
+                        # Store detection data for cropping
+                        detection_data.append({
+                            'bbox': (int(x1), int(y1), int(x2), int(y2)),
+                            'confidence': conf,
+                            'class_name': class_name,
+                            'class_id': cls_id
+                        })
+                        
+                        # Custom bbox drawing
                         color = self._get_color_for_class(cls_id)
                         cv.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
                         
@@ -225,20 +261,126 @@ class SelectiveFrameProcessor:
                                 cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
                     
                     self.detection_count += len(boxes)
-                    return annotated_frame, len(boxes)
+                    
+                    # Send detection data to cropping thread
+                    if detection_data and not self.crop_queue.full():
+                        try:
+                            self.crop_queue.put_nowait({
+                                'frame': frame.copy(),
+                                'detections': detection_data,
+                                'timestamp': time.time(),
+                                'frame_number': self.frame_counter
+                            })
+                        except queue.Full:
+                            print("Warning: Crop queue full, skipping detection data")
                 
-            return frame, 0
+                return annotated_frame, len(boxes), detection_data
+                
+            return frame, 0, []
             
         except Exception as e:
             print(f"YOLO inference error: {e}")
-            return frame, 0
+            return frame, 0, []
+
+    def _cropping_loop(self):
+        """Thread to process detection results and extract cropped face images"""
+        print("Cropping thread started - processing detected faces")
+        
+        while self.running:
+            try:
+                # Get detection data from queue with timeout
+                detection_data = self.crop_queue.get(timeout=1.0)
+                
+                frame = detection_data['frame']
+                detections = detection_data['detections']
+                timestamp = detection_data['timestamp']
+                frame_number = detection_data['frame_number']
+                
+                # Process each detection
+                for i, detection in enumerate(detections):
+                    bbox = detection['bbox']
+                    confidence = detection['confidence']
+                    class_name = detection['class_name']
+                    
+                    # Extract face region from frame
+                    x1, y1, x2, y2 = bbox
+                    
+                    # Ensure coordinates are within frame boundaries
+                    x1 = max(0, x1)
+                    y1 = max(0, y1)
+                    x2 = min(frame.shape[1], x2)
+                    y2 = min(frame.shape[0], y2)
+                    
+                    # Crop the face region
+                    if x2 > x1 and y2 > y1:  # Valid bounding box
+                        cropped_face = frame[y1:y2, x1:x2]
+                        
+                        if cropped_face.size > 0:  # Non-empty crop
+                            self.crop_count += 1
+                            
+                            # Save cropped face if enabled
+                            if self.save_crops:
+                                self._save_cropped_face(cropped_face, frame_number, i, confidence)
+                            
+                            # Optional: Display cropped face in separate window
+                            self._display_cropped_face(cropped_face, frame_number, i, confidence)
+                            
+                # Mark task as done
+                self.crop_queue.task_done()
+                
+            except queue.Empty:
+                # No data in queue, continue waiting
+                continue
+            except Exception as e:
+                print(f"Error in cropping thread: {e}")
+                continue
+                
+        print(f"Cropping thread stopped. Total faces cropped: {self.crop_count}")
+    
+    def _save_cropped_face(self, cropped_face, frame_number, detection_index, confidence):
+        """Save cropped face image to disk"""
+        try:
+            timestamp = int(time.time() * 1000)
+            filename = f"face_{timestamp}_f{frame_number}_d{detection_index}_c{confidence:.2f}.jpg"
+            filepath = os.path.join(self.crop_output_dir, filename)
+            
+            # Resize if too large for display
+            if cropped_face.shape[0] > 500 or cropped_face.shape[1] > 500:
+                cropped_face = cv.resize(cropped_face, (300, 300))
+            
+            cv.imwrite(filepath, cropped_face)
+            print(f"Saved cropped face: {filename}")
+            
+        except Exception as e:
+            print(f"Error saving cropped face: {e}")
+    
+    def _display_cropped_face(self, cropped_face, frame_number, detection_index, confidence):
+        """Display cropped face in a separate window (optional)"""
+        try:
+            # Resize for consistent display
+            display_face = cropped_face.copy()
+            if display_face.shape[0] > 300 or display_face.shape[1] > 300:
+                display_face = cv.resize(display_face, (300, 300))
+            
+            # Add info overlay
+            cv.putText(display_face, f"Frame: {frame_number}", (10, 20), 
+                      cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            cv.putText(display_face, f"Det: {detection_index}", (10, 40), 
+                      cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            cv.putText(display_face, f"Conf: {confidence:.2f}", (10, 60), 
+                      cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            
+            window_name = f"Face {detection_index} - Frame {frame_number}"
+            cv.imshow(window_name, display_face)
+            
+        except Exception as e:
+            print(f"Error displaying cropped face: {e}")
 
     def _get_color_for_class(self, class_id):
         """Generate consistent color for each class"""
         colors = [(0,255,0), (255,0,0), (0,0,255), (255,255,0), (255,0,255), (0,255,255)]
         return colors[class_id % len(colors)]   
    
-        
     def _processing_loop(self):
         """Run YOLO detection on frames at fixed time intervals"""
         print("YOLO processing thread started - sampling frames at fixed intervals")
@@ -262,7 +404,7 @@ class SelectiveFrameProcessor:
                     frames_processed += 1
                     
                     # Run YOLO object detection
-                    processed_frame, detections = self._run_yolo_detection(frame_to_process)
+                    processed_frame, detections, detection_data = self._run_yolo_detection(frame_to_process)
                     
                     # Resize frame to smaller display size
                     resized_frame = self._resize_frame(processed_frame)
@@ -271,7 +413,7 @@ class SelectiveFrameProcessor:
                     self._add_info_overlay(resized_frame, frame_num, frames_processed, detections)
                     
                     # Display the resized frame with detections
-                    cv.imshow("YOLO Object Detection - Selective Processing", resized_frame)
+                    cv.imshow("YOLO Face Detection - Selective Processing", resized_frame)
                     
                     # Handle key presses - only ESC for exit
                     key = cv.waitKey(1) & 0xFF
@@ -309,11 +451,13 @@ class SelectiveFrameProcessor:
                   cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
         cv.putText(frame, f"Total Detections: {self.detection_count}", (10, 105), 
                   cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
-        cv.putText(frame, f"Time: {timestamp}", (10, 125), 
+        cv.putText(frame, f"Faces Cropped: {self.crop_count}", (10, 125), 
+                  cv.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
+        cv.putText(frame, f"Time: {timestamp}", (10, 145), 
                   cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
-        cv.putText(frame, f"Interval: {self.processing_interval}s", (10, 140), 
+        cv.putText(frame, f"Interval: {self.processing_interval}s", (10, 160), 
                   cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
-        cv.putText(frame, "Press ESC to exit", (10, 155), 
+        cv.putText(frame, "Press ESC to exit", (10, 175), 
                   cv.FONT_HERSHEY_SIMPLEX, font_scale-0.1, (255, 255, 255), 1)
     
     def set_processing_interval(self, interval):
@@ -342,21 +486,23 @@ class SelectiveFrameProcessor:
             'display_size': f"{self.display_width}x{self.display_height}",
             'model': str(self.model_path),
             'confidence_threshold': self.conf_threshold,
-            'total_detections': self.detection_count
+            'total_detections': self.detection_count,
+            'faces_cropped': self.crop_count
         }
 
 
 def main():
     """
-    Demonstration of the SelectiveFrameProcessor with YOLO Object Detection
+    Demonstration of the SelectiveFrameProcessor with YOLO Face Detection and Cropping
     """
-    print("Selective Frame Processing with YOLO Object Detection")
+    print("Selective Frame Processing with YOLO Face Detection and Cropping")
     print("=" * 60)
     print("Features:")
     print("- Camera & RTSP support")
-    print("- Multi-threaded architecture")
-    print("- Selective frame sampling for CPU efficiency")
-    print("- YOLO object detection integration")
+    print("- Multi-threaded architecture (Capture, Processing, Cropping)")
+    print("- Selective frame sampling for CPU efficiency") 
+    print("- YOLO face detection integration")
+    print("- Automatic face cropping and saving")
     print("- Resizable display output")
     print("- Real-time performance monitoring")
     print("\nControls:")
@@ -371,11 +517,7 @@ def main():
             camera_index = int(input("Enter camera index (default 0): ") or "0")
             display_width = int(input("Enter display width (default 640): ") or "640")
             processing_interval = float(input("Enter processing interval in seconds (default 0.5): ") or "0.5")
-            model_path = input("Enter YOLO model path (or press Enter for pretrained model): ").strip()
-            
-            if not model_path:
-                model_path = "yolo11n-pose.pt"  # Use pretrained model as placeholder:cite[1]
-                print("Using pretrained YOLO11n model")
+            save_crops = input("Save cropped faces? (y/n, default y): ").strip().lower() != 'n'
             
             processor = SelectiveFrameProcessor(
                 source=camera_index,
@@ -383,7 +525,8 @@ def main():
                 processing_interval=processing_interval,
                 is_rtsp=False,
                 display_width=display_width,
-                model_path=model_path
+                model_path=model_path,
+                save_crops=save_crops
             )
             break
         elif choice == '2':
@@ -394,18 +537,15 @@ def main():
             
             display_width = int(input("Enter display width (default 640): ") or "640")
             processing_interval = float(input("Enter processing interval in seconds (default 1.0): ") or "1.0")
-            model_path = input("Enter YOLO model path (or press Enter for pretrained model): ").strip()
-            
-            if not model_path:
-                model_path = "yolo11n.pt"  # Use pretrained model as placeholder:cite[1]
-                print("Using pretrained YOLO11n model")
+            save_crops = input("Save cropped faces? (y/n, default y): ").strip().lower() != 'n'
             
             processor = SelectiveFrameProcessor(
                 source=rtsp_url,
                 processing_interval=processing_interval,
                 is_rtsp=True,
                 display_width=display_width,
-                model_path=model_path
+                model_path=model_path,
+                save_crops=save_crops
             )
             break
         else:
