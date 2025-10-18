@@ -8,7 +8,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 def test_json_structure():
     """Test loading your specific JSON structure"""
-    json_path = r"D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\run_py\query\face_embeddings_dataset.json"
+    json_path = input("Enter the json path: ").strip()
     
     with open(json_path, 'r') as f:
         data = json.load(f)
