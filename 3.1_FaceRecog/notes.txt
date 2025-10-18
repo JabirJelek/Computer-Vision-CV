@@ -32,8 +32,6 @@ https://vps.scasda.my.id/actions/a_notifikasi_suara_speaker.php
         3. SCMA - 5 = X
 
 
-
-
 ++ For face recognition ++
 
 -Utilization of embedding load:
