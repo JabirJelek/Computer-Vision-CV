@@ -740,7 +740,7 @@ def main():
             save_crops = input("Enable crop saving initially? (y/n, default y): ").strip().lower() != 'n'
             max_crops = int(input("Max crops to save (0 for unlimited, default 1000): ") or "1000")
             crop_quality = int(input("Crop image quality (1-100, default 95): ") or "95")
-            enable_preview = input("Enable crop preview windows? (y/n, default y): ").strip().lower() != 'n'
+            enable_preview = input("Enable crop preview windows? (y/n, default n): ").strip().lower() != 'y'
             
             processor = SelectiveFrameProcessor(
                 source=camera_index,
@@ -769,7 +769,7 @@ def main():
             save_crops = input("Enable crop saving initially? (y/n, default y): ").strip().lower() != 'n'
             max_crops = int(input("Max crops to save (0 for unlimited, default 1000): ") or "1000")
             crop_quality = int(input("Crop image quality (1-100, default 95): ") or "95")
-            enable_preview = input("Enable crop preview windows? (y/n, default y): ").strip().lower() != 'n'
+            enable_preview = input("Enable crop preview windows? (y/n, default n): ").strip().lower() != 'y'
             
             processor = SelectiveFrameProcessor(
                 source=rtsp_url,
