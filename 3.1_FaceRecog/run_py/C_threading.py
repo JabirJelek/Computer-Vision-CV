@@ -374,7 +374,7 @@ def main():
             model_path = input("Enter YOLO model path (or press Enter for pretrained model): ").strip()
             
             if not model_path:
-                model_path = "yolo11n-pose.pt"  # Use pretrained model as placeholder:cite[1]
+                model_path = "yolo11n.pt"  # Use pretrained model as placeholder
                 print("Using pretrained YOLO11n model")
             
             processor = SelectiveFrameProcessor(
