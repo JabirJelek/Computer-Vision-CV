@@ -54,13 +54,13 @@ class FaceQuerySystem:
         print(f"✅ Created embeddings array with shape: {np.array(embeddings).shape}")
         return np.array(embeddings)
     
-    def query_by_image(self, query_image_path: str, top_k: int = 5, similarity_threshold: float = 0.6) -> List[Dict]:
+    def query_by_image(self, query_image_path: str, top_k: int = 5, similarity_threshold: float = 0.8) -> List[Dict]:
         """
         Query similar faces using an image path
         """
         try:
             print(f"🔍 Generating embedding for query image: {query_image_path}")
-            query_embedding_obj = DeepFace.represent(query_image_path, model_name='Facenet')  # Use Facenet to match your embeddings
+            query_embedding_obj = DeepFace.represent(query_image_path, model_name='Facenet', enforce_detection=False)  # Use Facenet to match your embeddings
             query_embedding = np.array(query_embedding_obj[0]['embedding']).reshape(1, -1)
             print(f"✅ Query embedding generated: {query_embedding.shape}")
         except Exception as e:
@@ -69,7 +69,7 @@ class FaceQuerySystem:
         
         return self._find_similar_faces(query_embedding, top_k, similarity_threshold)
     
-    def query_by_embedding(self, query_embedding: np.ndarray, top_k: int = 5, similarity_threshold: float = 0.6) -> List[Dict]:
+    def query_by_embedding(self, query_embedding: np.ndarray, top_k: int = 5, similarity_threshold: float = 0.8) -> List[Dict]:
         """
         Query similar faces using a pre-computed embedding vector
         """
@@ -180,7 +180,7 @@ class EnhancedFaceQuerySystem(FaceQuerySystem):
                 image_path = os.path.join(query_images_dir, filename)
                 print(f"🔍 Processing {filename}...")
                 
-                matches = self.query_by_image(image_path, top_k=3, similarity_threshold=0.6)
+                matches = self.query_by_image(image_path, top_k=3, similarity_threshold=0.8)
                 results[filename] = {
                     'query_image': filename,
                     'matches': matches,
