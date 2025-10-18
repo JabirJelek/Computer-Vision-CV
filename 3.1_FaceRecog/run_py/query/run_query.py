@@ -5,7 +5,7 @@ from face_query_system import FaceQuerySystem
 def main():
     try:
         # Initialize with your embeddings
-        json_path = input("Enter the json path: ").strip()
+        json_path = input("Enter the json embedding path: ").strip()
         print("🚀 Initializing Face Query System...")
         query_system = FaceQuerySystem(json_path)
         
