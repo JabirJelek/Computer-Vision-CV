@@ -34,4 +34,5 @@ def analyze_json_structure(json_path):
                     print(f"    First item type: {type(value[0])}")
 
 # Run the analysis
-analyze_json_structure(r"D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\face_embeddings_dataset.json")
+the_path = input("Enter the json path: ").strip()
+analyze_json_structure(the_path)
