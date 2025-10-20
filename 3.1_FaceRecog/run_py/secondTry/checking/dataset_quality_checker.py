@@ -279,7 +279,7 @@ class DatasetQualityChecker:
 
 def main():
     # Analyze your dataset quality
-    dataset_json = "simple_face_dataset.json"  # Your dataset path
+    dataset_json = input("Enter your dataset json file path: ").strip()  # Your dataset path
     
     checker = DatasetQualityChecker(dataset_json)
     

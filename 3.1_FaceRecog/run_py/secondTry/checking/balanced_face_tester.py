@@ -172,8 +172,8 @@ def debug_false_positive(dataset_json: str, query_image_path: str, expected_pers
 
 def main():
     dataset_json = input("Enter dataset path: ").strip()
-    query_image = r"D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\run_py\cropped_faces\2025-10-18\11-04-40\face_1760760282015_f27_d1_c0.508.jpg"  # Update this
-    expected_person = "Rena"  # Update with actual name
+    query_image = input("Enter data path that will be used to compare with: ").strip()  # Update this
+    expected_person = input("Enter expected person from the query image: ").strip()  # Update with actual name
     
     debug_false_positive(dataset_json, query_image, expected_person)
 
