@@ -503,6 +503,23 @@ class RealTimeProcessor:
             performance['adjustment_direction'] = self.get_adjustment_direction(performance)
         
         return performance
+        
+    def scale_bbox_to_display(self, bbox: List[int], original_shape: Tuple[int, int], display_shape: Tuple[int, int]) -> List[int]:
+        """Scale bounding box coordinates from original frame to display frame"""
+        x1, y1, x2, y2 = bbox
+        orig_h, orig_w = original_shape
+        disp_h, disp_w = display_shape
+        
+        scale_x = disp_w / orig_w
+        scale_y = disp_h / orig_h
+        
+        return [
+            int(x1 * scale_x),
+            int(y1 * scale_y), 
+            int(x2 * scale_x),
+            int(y2 * scale_y)
+        ]    
+    
 
     def calculate_detection_quality(self, performance: Dict) -> float:
         """Calculate overall detection quality score (0-1)"""
@@ -1352,7 +1369,7 @@ class RealTimeProcessor:
             self.set_display_scale(0.75)
         elif key == ord('5'):
             self.set_display_scale(1.0)
-        elif key == ord('6'):
+        elif key == ord('6'): 
             self.set_display_scale(1.5)
         elif key == ord('7'):
             self.set_display_size(1280, 720, "crop")
@@ -1428,6 +1445,21 @@ class RealTimeProcessor:
                     results = scaled_results
                     self.processing_count += 1
                     last_results = results
+                    
+                    # NEW: Scale results for display
+                    display_h, display_w = display_frame.shape[:2]
+                    display_results = []
+                    for result in results:
+                        display_bbox = self.scale_bbox_to_display(
+                            result['bbox'],
+                            (original_h, original_w),
+                            (display_h, display_w)
+                        )
+                        display_result = result.copy()
+                        display_result['bbox'] = display_bbox
+                        display_results.append(display_result)
+                    
+                    results = display_results  # Use display-scaled results for drawing
                     
                     # Dynamic adjustment
                     if self.dynamic_adjustment_enabled and self.frame_count % self.adaptive_check_interval == 0:
