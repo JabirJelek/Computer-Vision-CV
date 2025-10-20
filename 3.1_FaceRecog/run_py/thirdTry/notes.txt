@@ -1,0 +1,11 @@
+Project structure:
+
+face_recognition_system/
+├── main.py
+├── config.py
+├── face_detector.py
+├── face_recognizer.py
+├── utils/
+│   └── camera.py
+└── data/
+    └── embeddings.json  # Your JSON file
