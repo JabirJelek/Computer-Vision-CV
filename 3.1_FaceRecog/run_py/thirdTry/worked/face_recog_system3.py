@@ -1313,12 +1313,12 @@ class RealTimeProcessor:
             self.processing_height = min(1080, self.processing_height + 120)
             print(f"📐 Processing resolution: {old_w}x{old_h} → {self.processing_width}x{self.processing_height}")
             
-        elif key == ord('a'):  # NEW: Toggle dynamic adjustment
+        elif key == ord('a'):  # Toggle dynamic adjustment
             self.dynamic_adjustment_enabled = not self.dynamic_adjustment_enabled
             status = "ENABLED" if self.dynamic_adjustment_enabled else "DISABLED"
             print(f"🎯 Dynamic adjustment: {status}")
             
-        elif key == ord('z'):  # NEW: Reset dynamic scaling
+        elif key == ord('z'):  # Reset dynamic scaling
             old_scale = self.current_processing_scale
             self.current_processing_scale = 1.0
             self.performance_history = []
@@ -1326,19 +1326,19 @@ class RealTimeProcessor:
             self.consecutive_good_detections = 0
             print(f"🔄 Dynamic scaling reset: {old_scale:.2f} → 1.00")
             
-        elif key == ord('c'):  # NEW: Force increase processing scale
+        elif key == ord('c'):  # Force increase processing scale
             old_scale = self.current_processing_scale
             self.current_processing_scale = min(self.max_processing_scale, 
                                             self.current_processing_scale + 0.2)
             print(f"🔼 Manual scale increase: {old_scale:.2f} → {self.current_processing_scale:.2f}")
             
-        elif key == ord('v'):  # NEW: Force decrease processing scale
+        elif key == ord('v'):  # Force decrease processing scale
             old_scale = self.current_processing_scale
             self.current_processing_scale = max(self.min_processing_scale, 
                                             self.current_processing_scale - 0.2)
             print(f"🔽 Manual scale decrease: {old_scale:.2f} → {self.current_processing_scale:.2f}")
             
-        elif key == ord('n'):  # NEW: Toggle between fixed and dynamic processing
+        elif key == ord('n'):  # Toggle between fixed and dynamic processing
             if self.processing_scale == 1.0:  # Currently using fixed resolution
                 self.processing_scale = 0.0  # Switch to dynamic scaling
                 print("🎯 Switched to DYNAMIC processing scale")
@@ -1346,16 +1346,16 @@ class RealTimeProcessor:
                 self.processing_scale = 1.0  # Switch to fixed resolution
                 print("📐 Switched to FIXED processing resolution")
                 
-        elif key == ord('m'):  # NEW: Cycle through processing presets
+        elif key == ord('m'):  # Cycle through processing presets
             self.cycle_processing_preset()
             
-        elif key == ord('t'):  # NEW: Toggle face tracking (if implemented)
+        elif key == ord('t'):  # Toggle face tracking (if implemented)
             self.toggle_face_tracking()
             
-        elif key == ord('l'):  # NEW: Toggle logging to file
+        elif key == ord('l'):  # Toggle logging to file
             self.toggle_logging()
             
-        elif key == ord('k'):  # NEW: Take snapshot with metadata
+        elif key == ord('k'):  # Take snapshot with metadata
             self.take_annotated_snapshot(display_frame)
             
         # Display resize methods (1-8, 0)
