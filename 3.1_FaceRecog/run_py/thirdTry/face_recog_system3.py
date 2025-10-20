@@ -528,17 +528,17 @@ class RealTimeProcessor:
         # Face size factor (normalized to target)
         if performance['avg_face_size'] > 0:
             size_factor = min(performance['avg_face_size'] / self.target_face_size, 1.0)
-            quality_factors.append(size_factor * 0.4)  # 40% weight
+            quality_factors.append(size_factor * 0.5)  # 50% weight
         
         # Detection confidence factor
         if performance['detection_confidences']:
             conf_factor = np.mean(performance['detection_confidences'])
-            quality_factors.append(conf_factor * 0.3)  # 30% weight
+            quality_factors.append(conf_factor * 0.4)  # 40% weight
         
         # Recognition rate factor (if applicable)
         if performance['recognition_rates']:
             recog_factor = np.mean(performance['recognition_rates'])
-            quality_factors.append(recog_factor * 0.3)  # 30% weight
+            quality_factors.append(recog_factor * 0.4)  # 40% weight
         else:
             # If no recognitions but detections exist, use medium weight
             quality_factors.append(0.15)
@@ -1442,24 +1442,39 @@ class RealTimeProcessor:
                         scaled_result['bbox'] = scaled_bbox
                         scaled_results.append(scaled_result)
                     
-                    results = scaled_results
+                    last_results = scaled_results
                     self.processing_count += 1
-                    last_results = results
                     
-                    # NEW: Scale results for display
-                    display_h, display_w = display_frame.shape[:2]
-                    display_results = []
-                    for result in results:
-                        display_bbox = self.scale_bbox_to_display(
-                            result['bbox'],
-                            (original_h, original_w),
-                            (display_h, display_w)
-                        )
-                        display_result = result.copy()
-                        display_result['bbox'] = display_bbox
-                        display_results.append(display_result)
+                    # Dynamic adjustment
+                    if self.dynamic_adjustment_enabled and self.frame_count % self.adaptive_check_interval == 0:
+                        performance = self.analyze_detection_performance(scaled_results, processing_frame.shape)
+                        self.performance_history.append(performance)
+                        last_performance = performance
+                        self.apply_dynamic_adjustment(performance)
                     
-                    results = display_results  # Use display-scaled results for drawing
+                    # Log performance data if enabled
+                    if getattr(self, 'logging_enabled', False):
+                        self.log_performance_data()
+                else:
+                    scaled_results = last_results
+
+                # ALWAYS apply display scaling to results (whether new or cached)
+                display_h, display_w = display_frame.shape[:2]
+                display_results = []
+                for result in scaled_results:
+                    display_bbox = self.scale_bbox_to_display(
+                        result['bbox'],
+                        (original_h, original_w),
+                        (display_h, display_w)
+                    )
+                    display_result = result.copy()
+                    display_result['bbox'] = display_bbox
+                    display_results.append(display_result)
+
+                results = display_results
+
+                if self.save_debug_frames and should_process:
+                    self.save_debug_frame(display_frame, results)
                     
                     # Dynamic adjustment
                     if self.dynamic_adjustment_enabled and self.frame_count % self.adaptive_check_interval == 0:
