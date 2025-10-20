@@ -6,7 +6,7 @@ from typing import Dict, List
 import time
 
 class SimpleFaceDatasetCreator:
-    def __init__(self, dataset_root: str, output_json: str = "all_face_dataset_1.json"):
+    def __init__(self, dataset_root: str, output_json: str = "person_folder1.json"):
         self.dataset_root = dataset_root
         self.output_json = output_json
         self.dataset = {"persons": {}, "metadata": {}}
