@@ -409,8 +409,8 @@ class RealTimeProcessor:
         self.original_frame_size = None
         
         # Processing resolution - resize input stream for processing
-        self.processing_width = 1000  # Default processing width
-        self.processing_height = 500  # Default processing height
+        self.processing_width = 1280  # Default processing width
+        self.processing_height = 720  # Default processing height
         self.processing_scale = 1.0   # Scale factor for processing
         
         # Debug controls
@@ -444,17 +444,9 @@ class RealTimeProcessor:
         self.adjustment_cooldown = 0
         
         print("🎯 Dynamic resolution adjustment ENABLED")
-            
-        # Enhanced control attributes
-        self.face_tracking_enabled = False
-        self.logging_enabled = False
-        self.current_preset_index = 0
-        
         print("🎮 Enhanced keyboard controls LOADED")        
         
         # Initialize tracker
-        self.face_tracker = SimpleFaceTracker(confidence_frames=15, cooldown_seconds=11)
-        
         self.face_tracking_enabled = True  # Enable tracking by default
         self.logging_enabled = False
         self.current_preset_index = 0
@@ -954,7 +946,7 @@ class RealTimeProcessor:
         from datetime import datetime
         
         if not hasattr(self, 'log_file'):
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.log_file = f"performance_log_{timestamp}.csv"
             
             # Write header
@@ -1201,7 +1193,57 @@ class RealTimeProcessor:
             # Draw debug text
             cv2.putText(frame, info_text, (x1, text_y), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-    
+
+    def draw_tracking_info(self, frame: np.ndarray, results: List[Dict]):
+        """Draw tracking status on frame """
+        for result in results:
+            x1, y1, x2, y2 = result['bbox']
+            identity = result['identity']
+            track_state = result.get('track_state', 'NEW')
+            track_id = result.get('track_id', 'N/A')
+            rec_conf = result.get('recognition_confidence', 0)
+            det_conf = result.get('detection_confidence', 0)
+            
+            # Color coding based on track state
+            if track_state == 'COOLDOWN':
+                color = (0, 255, 255)  # Yellow - trusted identity
+                status_symbol = ""
+                label = f"{identity} {status_symbol}" if identity else f"Unknown {status_symbol}"
+            elif track_state == 'TRACKING':
+                color = (0, 255, 0)    # Green - building confidence
+                # Find confidence count from active tracks
+                conf_count = 0
+                for track in self.face_tracker.active_tracks.values():
+                    if np.array_equal(track.get('current_bbox', []), result['bbox']):
+                        conf_count = track.get('confidence_count', 0)
+                        break
+                status_symbol = f"({conf_count}/{self.face_tracker.confidence_frames})"
+                label = f"{identity} {status_symbol}" if identity else f"Unknown {status_symbol}"
+            else:  #  No "?" for recognized faces
+                color = (0, 0, 255)    # Red - new/unconfirmed
+                if identity:
+                    # Recognized but new track - show identity without "?"
+                    label = f"{identity} (NEW)"
+                else:
+                    # Unrecognized new face
+                    label = "Unknown"
+            
+            # Draw bounding box with track state
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            
+            # Draw label with track info
+            label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+            cv2.rectangle(frame, (x1, y1 - label_size[1] - 10), 
+                        (x1 + label_size[0], y1), color, -1)
+            cv2.putText(frame, label, (x1, y1 - 5), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            
+            # Draw track ID and confidence for debugging
+            if self.debug_mode:
+                debug_text = f"ID:{track_id} Rec:{rec_conf:.2f}"
+                cv2.putText(frame, debug_text, (x1, y2 + 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+                
     def draw_results(self, frame: np.ndarray, results: List[Dict]):
         """Enhanced visualization with tracking state awareness"""
         if self.original_frame_size is None:
@@ -1398,7 +1440,7 @@ class RealTimeProcessor:
                 print("🎯 Switched to DYNAMIC processing scale")
             else:  # Currently using dynamic scaling
                 self.processing_scale = 1.0  # Switch to fixed resolution
-                print("📐 Switched to FIXED processing resolution")
+                print("📐 Switched to processing resolution")
                 
         elif key == ord('m'):  # Cycle through processing presets
             self.cycle_processing_preset()
@@ -1447,7 +1489,7 @@ class RealTimeProcessor:
                         
             
     def run(self, source: str = "0"):
-        """Main loop with enhanced key controls - FIXED DUPLICATE CODE"""
+        """Main loop with enhanced key controls """
         try:
             self.initialize_stream(source)
             self.start_frame_capture()
@@ -1769,52 +1811,7 @@ class SimpleFaceTracker:
         
         return self._get_final_results(recognition_results)
 
-def draw_tracking_info(self, frame: np.ndarray, results: List[Dict]):
-    """Draw tracking status on frame - ENHANCED INTEGRATION"""
-    for result in results:
-        x1, y1, x2, y2 = result['bbox']
-        identity = result['identity']
-        track_state = result.get('track_state', 'NEW')
-        track_id = result.get('track_id', 'N/A')
-        rec_conf = result.get('recognition_confidence', 0)
-        det_conf = result.get('detection_confidence', 0)
-        
-        # Color coding based on track state
-        if track_state == 'COOLDOWN':
-            color = (0, 255, 255)  # Yellow - trusted identity
-            status_symbol = "✓"
-            label = f"{identity} {status_symbol}" if identity else f"Unknown {status_symbol}"
-        elif track_state == 'TRACKING':
-            color = (0, 255, 0)    # Green - building confidence
-            # Find confidence count from active tracks
-            conf_count = 0
-            for track in self.face_tracker.active_tracks.values():
-                if np.array_equal(track.get('current_bbox', []), result['bbox']):
-                    conf_count = track.get('confidence_count', 0)
-                    break
-            status_symbol = f"({conf_count}/{self.face_tracker.confidence_frames})"
-            label = f"{identity} {status_symbol}" if identity else f"Unknown {status_symbol}"
-        else:  # NEW
-            color = (0, 0, 255)    # Red - new/unconfirmed
-            status_symbol = "?"
-            label = f"{identity} {status_symbol}" if identity else "Unknown"
-        
-        # Draw bounding box with track state
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        
-        # Draw label with track info
-        label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-        cv2.rectangle(frame, (x1, y1 - label_size[1] - 10), 
-                     (x1 + label_size[0], y1), color, -1)
-        cv2.putText(frame, label, (x1, y1 - 5), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        
-        # Draw track ID and confidence for debugging
-        if self.debug_mode:
-            debug_text = f"ID:{track_id} Rec:{rec_conf:.2f}"
-            cv2.putText(frame, debug_text, (x1, y2 + 20),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
-                                           
+                                          
 # Enhanced configuration with fallbacks and validation
 CONFIG = {
     'detection_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\yolov11n-face.pt',
@@ -1893,7 +1890,7 @@ def main():
         print(f"🔍 Testing source: {source}")
         
         # Configure display and processing defaults
-        processor.set_display_size(1024, 768, "fixed_size")
+        processor.set_display_size(1280, 768, "fixed_size")
         processor.set_processing_scale(1.0)
         
         # Enable key features by default
