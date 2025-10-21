@@ -1393,6 +1393,42 @@ class RealTimeProcessor:
             old_interval = self.processing_interval
             self.processing_interval = max(self.processing_interval - 5, 1)
             print(f"⏱️  Processing interval: 1/{old_interval} → 1/{self.processing_interval}")
+                
+    def draw_tracking_info(self, frame: np.ndarray, results: List[Dict]):
+        """Draw tracking status on frame"""
+        for result in results:
+            x1, y1, x2, y2 = result['bbox']
+            identity = result['identity']
+            track_state = result.get('track_state', 'NEW')
+            track_id = result.get('track_id', 'N/A')
+            
+            # Color coding based on track state
+            if track_state == 'COOLDOWN':
+                color = (0, 255, 255)  # Yellow - trusted identity
+                label = f"{identity} ✓"
+            elif track_state == 'TRACKING':
+                color = (0, 255, 0)    # Green - building confidence
+                conf_count = next((t['confidence_count'] for t in self.face_tracker.active_tracks.values() 
+                                if t.get('current_bbox') == result['bbox']), 0)
+                label = f"{identity} ({conf_count}/{self.face_tracker.confidence_frames})"
+            else:  # NEW
+                color = (0, 0, 255)    # Red - new/unconfirmed
+                label = f"{identity} ?" if identity else "Unknown"
+            
+            # Draw bounding box with track state
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            
+            # Draw label with track info
+            label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+            cv2.rectangle(frame, (x1, y1 - label_size[1] - 10), 
+                        (x1 + label_size[0], y1), color, -1)
+            cv2.putText(frame, label, (x1, y1 - 5), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            
+            # Draw track ID for debugging
+            if self.debug_mode:
+                cv2.putText(frame, f"Track: {track_id}", (x1, y2 + 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)            
                         
             
     def run(self, source: str = "0"):
@@ -1735,42 +1771,6 @@ class SimpleFaceTracker:
         self.active_tracks = current_tracks
         
         return self._get_final_results(recognition_results)
-
-def draw_tracking_info(self, frame: np.ndarray, results: List[Dict]):
-    """Draw tracking status on frame"""
-    for result in results:
-        x1, y1, x2, y2 = result['bbox']
-        identity = result['identity']
-        track_state = result.get('track_state', 'NEW')
-        track_id = result.get('track_id', 'N/A')
-        
-        # Color coding based on track state
-        if track_state == 'COOLDOWN':
-            color = (0, 255, 255)  # Yellow - trusted identity
-            label = f"{identity} ✓"
-        elif track_state == 'TRACKING':
-            color = (0, 255, 0)    # Green - building confidence
-            conf_count = next((t['confidence_count'] for t in self.face_tracker.active_tracks.values() 
-                             if t.get('current_bbox') == result['bbox']), 0)
-            label = f"{identity} ({conf_count}/{self.face_tracker.confidence_frames})"
-        else:  # NEW
-            color = (0, 0, 255)    # Red - new/unconfirmed
-            label = f"{identity} ?" if identity else "Unknown"
-        
-        # Draw bounding box with track state
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        
-        # Draw label with track info
-        label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-        cv2.rectangle(frame, (x1, y1 - label_size[1] - 10), 
-                     (x1 + label_size[0], y1), color, -1)
-        cv2.putText(frame, label, (x1, y1 - 5), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        
-        # Draw track ID for debugging
-        if self.debug_mode:
-            cv2.putText(frame, f"Track: {track_id}", (x1, y2 + 20),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
                                  
 # Enhanced configuration with fallbacks and validation
 CONFIG = {
