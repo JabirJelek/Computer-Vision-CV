@@ -528,17 +528,17 @@ class RealTimeProcessor:
         # Face size factor (normalized to target)
         if performance['avg_face_size'] > 0:
             size_factor = min(performance['avg_face_size'] / self.target_face_size, 1.0)
-            quality_factors.append(size_factor * 0.5)  # 50% weight
+            quality_factors.append(size_factor * 0.6)  # 60% weight
         
         # Detection confidence factor
         if performance['detection_confidences']:
             conf_factor = np.mean(performance['detection_confidences'])
-            quality_factors.append(conf_factor * 0.4)  # 40% weight
+            quality_factors.append(conf_factor * 0.7)  # 70% weight
         
         # Recognition rate factor (if applicable)
         if performance['recognition_rates']:
             recog_factor = np.mean(performance['recognition_rates'])
-            quality_factors.append(recog_factor * 0.4)  # 40% weight
+            quality_factors.append(recog_factor * 0.5)  # 50% weight
         else:
             # If no recognitions but detections exist, use medium weight
             quality_factors.append(0.15)
@@ -1576,12 +1576,12 @@ class RealTimeProcessor:
 # Enhanced configuration with fallbacks and validation
 CONFIG = {
     'detection_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\yolov11n-face.pt',
-    'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\run_py\secondTry\person_folder1.json',
+    'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\run_py\person_folder1.1.json',
     'detection_confidence': 0.6,
     'detection_iou': 0.5,
     'roi_padding': 10,
     'embedding_model': 'Facenet',
-    'recognition_threshold': 0.3,
+    'recognition_threshold': 0.5,
     'max_faces_per_frame': 10,  # Limit faces per frame
     'min_face_size': 50,  # Minimum face size in pixels
     'enable_face_tracking': True,  # Basic tracking between frames
