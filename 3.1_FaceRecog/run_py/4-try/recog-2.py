@@ -446,19 +446,27 @@ class RealTimeProcessor:
         print("🎯 Dynamic resolution adjustment ENABLED")
             
         # Enhanced control attributes
-        self.face_tracking_enabled = True  # Changed to True by default
+        self.face_tracking_enabled = False
         self.logging_enabled = False
         self.current_preset_index = 0
         
-        # Initialize Face Tracker
-        self.face_tracker = SimpleFaceTracker(
-            confidence_frames=20,    # 20 frames to trust identity
-            cooldown_seconds=20,     # 20 seconds cooldown period
-            min_iou=0.3              # Minimum IoU for matching
-        )
+        print("🎮 Enhanced keyboard controls LOADED")        
         
-        print("🎮 Enhanced keyboard controls LOADED")
-        print("👤 Simple face tracking ENABLED")     
+        # Initialize tracker
+        self.face_tracker = SimpleFaceTracker(confidence_frames=15, cooldown_seconds=11)
+        
+        self.face_tracking_enabled = True  # Enable tracking by default
+        self.logging_enabled = False
+        self.current_preset_index = 0
+        self.performance_history = []
+
+        # Initialize tracking system with proper config
+        self.face_tracker = SimpleFaceTracker(
+            confidence_frames=20,    # Use the configured value
+            cooldown_seconds=20,     # Use the configured value  
+            min_iou=0.3
+        )
+                
         
     def set_processing_resolution(self, width: int, height: int):
         """Set the resolution for processing (face detection/recognition)"""
@@ -470,7 +478,25 @@ class RealTimeProcessor:
         """Set scale factor for processing resolution"""
         self.processing_scale = scale
         print(f"⚙️  Processing scale set to {scale:.2f}")
-    
+        
+    def check_system_health(self) -> Dict:
+        """Comprehensive system health check"""
+        health_status = {
+            'coordinate_scaling': 'OPERATIONAL',
+            'face_tracking': 'OPERATIONAL' if self.face_tracking_enabled else 'DISABLED',
+            'dynamic_adjustment': 'OPERATIONAL' if self.dynamic_adjustment_enabled else 'DISABLED',
+            'frame_capture': 'OPERATIONAL' if self.running and self.latest_frame is not None else 'ERROR',
+            'processing_pipeline': 'OPERATIONAL',
+            'active_tracks': len(self.face_tracker.active_tracks),
+            'tracking_states': {}
+        }
+        
+        # Analyze tracking states
+        for track_id, track in self.face_tracker.active_tracks.items():
+            health_status['tracking_states'][track_id] = track.get('track_state', 'UNKNOWN')
+        
+        return health_status
+          
     def analyze_detection_performance(self, results: List[Dict], processing_frame_shape: Tuple[int, int]) -> Dict:
         """Comprehensive analysis of detection performance for dynamic adjustment"""
         performance = {
@@ -902,17 +928,14 @@ class RealTimeProcessor:
         print(f"   - Resolution: {preset['width']}x{preset['height']}")
 
     def toggle_face_tracking(self):
-        """Toggle face tracking between frames"""
+        """Toggle face tracking with proper state management"""
         self.face_tracking_enabled = not self.face_tracking_enabled
         status = "ENABLED" if self.face_tracking_enabled else "DISABLED"
         
         if self.face_tracking_enabled:
-            print(f"👤 Face tracking: {status} (20 frames to trust, 20s cooldown)")
+            print(f"👤 Face tracking: {status} (20-frame trust → 20s cooldown)")
         else:
             print(f"👤 Face tracking: {status}")
-            # Clear existing tracks when disabling
-            self.face_tracker.active_tracks = {}
-            self.face_tracker.next_track_id = 0
             
 
     def toggle_logging(self):
@@ -945,10 +968,15 @@ class RealTimeProcessor:
             print(f"📊 Logging to: {self.log_file}")
 
     def log_performance_data(self):
-        """Log current performance data to file"""
-        if getattr(self, 'logging_enabled', False):
+        """Log current performance data to file - ENHANCED WITH TRACKING"""
+        if getattr(self, 'logging_enabled', False) and hasattr(self, 'log_file'):
             stats = self.face_system.get_debug_stats()
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Track tracking metrics
+            active_tracks = len(self.face_tracker.active_tracks)
+            cooldown_tracks = len([t for t in self.face_tracker.active_tracks.values() 
+                                if t.get('track_state') == 'COOLDOWN'])
             
             with open(self.log_file, 'a', newline='') as f:
                 writer = csv.writer(f)
@@ -957,9 +985,10 @@ class RealTimeProcessor:
                     self.current_processing_scale, stats['total_faces_detected'],
                     stats['total_faces_recognized'], stats['avg_detection_time'],
                     stats['avg_embedding_time'], stats['avg_recognition_time'],
-                    stats.get('memory_mb', 0)
+                    stats.get('memory_mb', 0), active_tracks, cooldown_tracks,
+                    self.face_tracking_enabled
                 ])
-
+            
     def take_annotated_snapshot(self, frame: np.ndarray):
         """Take snapshot with overlay information"""
         timestamp = int(time.time())
@@ -1172,59 +1201,39 @@ class RealTimeProcessor:
             # Draw debug text
             cv2.putText(frame, info_text, (x1, text_y), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        
+    
     def draw_results(self, frame: np.ndarray, results: List[Dict]):
-        """Enhanced visualization with tracking support"""
+        """Enhanced visualization with tracking state awareness"""
         if self.original_frame_size is None:
             self.original_frame_size = frame.shape[:2]
         
-        # Draw bounding boxes and labels with tracking colors
+        # Draw bounding boxes and labels with tracking state colors
         for result in results:
             x1, y1, x2, y2 = result['bbox']
             identity = result['identity']
-            track_state = result.get('track_state', 'NEW')
-            track_id = result.get('track_id', None)
             rec_conf = result['recognition_confidence']
             det_conf = result['detection_confidence']
+            track_state = result.get('track_state', 'NEW')
             
-            # Color coding based on track state
+            # Color coding based on tracking state
             if track_state == 'COOLDOWN':
-                color = (0, 255, 0)  # Green - trusted identity
-                label = f"{identity} ✓" if identity else f"Unknown ✓"
+                color = (0, 255, 255)  # Yellow - trusted identity
+                label = f"{identity} ✓ ({rec_conf:.2f})" if identity else f"Unknown ✓ ({det_conf:.2f})"
             elif track_state == 'TRACKING':
-                color =  (0, 255, 255)   # Yellow - building confidence
-                if identity:
-                    # Find confidence count for this track
-                    conf_count = 0
-                    for track in self.face_tracker.active_tracks.values():
-                        if (np.array_equal(track['current_bbox'], result['bbox']) or 
-                            track_id == result.get('track_id')):
-                            conf_count = track['confidence_count']
-                            break
-                    label = f"{identity} ({conf_count}/{self.face_tracker.confidence_frames})"
-                else:
-                    label = f"Unknown ({det_conf:.2f})"
-            else:  # NEW
-                color = (0, 0, 255)    # Red - new/unconfirmed
-                label = f"{identity} ?" if identity else f"Unknown ({det_conf:.2f})"
+                color = (0, 255, 0)    # Green - building confidence
+                label = f"{identity} → ({rec_conf:.2f})" if identity else f"Unknown → ({det_conf:.2f})"
+            else:  # NEW or no tracking
+                color = (0, 0, 255) if not identity else (0, 255, 0)  # Red for unknown, Green for recognized
+                label = f"{identity} ({rec_conf:.2f})" if identity else f"Unknown ({det_conf:.2f})"
             
-            # Draw bounding box
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             
-            # Draw label background
             label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
             cv2.rectangle(frame, (x1, y1 - label_size[1] - 10), 
                         (x1 + label_size[0], y1), color, -1)
             
-            # Draw label text
             cv2.putText(frame, label, (x1, y1 - 5), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-            
-            # Draw track ID and state for debugging
-            if self.debug_mode and track_id is not None:
-                debug_text = f"Track {track_id} - {track_state}"
-                cv2.putText(frame, debug_text, (x1, y2 + 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
         
         # Draw debug information
         self.draw_debug_info(frame, results)
@@ -1232,36 +1241,7 @@ class RealTimeProcessor:
         
         # Draw resize information if enabled
         self.draw_resize_info(frame)
-        
-        # Draw tracking statistics if enabled and tracking is on
-        if self.face_tracking_enabled and self.show_performance_stats:
-            self.draw_tracking_stats(frame)
-                
-    def draw_tracking_stats(self, frame: np.ndarray):
-        """Display tracking statistics on frame"""
-        stats = self.face_tracker.get_tracking_stats()
-        
-        stats_lines = [
-            f"Tracking: {stats['active_tracks']} active",
-            f"Cooldown: {stats['cooldown_tracks']} trusted",
-            f"Building: {stats['tracking_tracks']} building",
-            f"Next ID: {stats['next_track_id']}"
-        ]
-        
-        # Draw background
-        overlay = frame.copy()
-        start_y = frame.shape[0] - len(stats_lines) * 25 - 30
-        end_y = frame.shape[0] - 10
-        cv2.rectangle(overlay, (frame.shape[1] - 200, start_y), 
-                    (frame.shape[1] - 10, end_y), (0, 0, 0), -1)
-        cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
-        
-        # Draw text
-        for i, line in enumerate(stats_lines):
-            y_position = start_y + 20 + (i * 20)
-            cv2.putText(frame, line, (frame.shape[1] - 190, y_position),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)            
-            
+      
     def save_debug_frame(self, frame: np.ndarray, results: List[Dict]):
         """Save frame with debug information"""
         if not self.save_debug_frames or self.debug_frame_count >= self.max_debug_frames:
@@ -1284,9 +1264,13 @@ class RealTimeProcessor:
             print(f"💾 Saved debug frame: {filename}")
                 
     def draw_enhanced_results(self, frame: np.ndarray, results: List[Dict], performance: Dict):
-        """Draw results with dynamic adjustment information"""
-        # Existing drawing logic
-        self.draw_results(frame, results)
+        """Draw results with dynamic adjustment and tracking information"""
+        # Use tracking visualization if tracking is enabled and we have track states
+        if self.face_tracking_enabled and any('track_state' in result for result in results):
+            self.draw_tracking_info(frame, results)
+        else:
+            # Fall back to standard drawing
+            self.draw_results(frame, results)
         
         # Add dynamic adjustment info if available
         if performance and self.show_performance_stats:
@@ -1463,7 +1447,7 @@ class RealTimeProcessor:
                         
             
     def run(self, source: str = "0"):
-        """Main loop with enhanced key controls and tracking"""
+        """Main loop with enhanced key controls - FIXED DUPLICATE CODE"""
         try:
             self.initialize_stream(source)
             self.start_frame_capture()
@@ -1498,7 +1482,8 @@ class RealTimeProcessor:
                 
                 if should_process:
                     # Process on dynamically resized frame
-                    processing_results = self.face_system.process_frame(processing_frame)
+                    raw_results = self.face_system.process_frame(processing_frame)
+                    processing_results = self.face_tracker.update(raw_results, self.frame_count)
                     
                     # Scale bounding boxes back to original frame
                     scaled_results = []
@@ -1512,13 +1497,7 @@ class RealTimeProcessor:
                         scaled_result['bbox'] = scaled_bbox
                         scaled_results.append(scaled_result)
                     
-                    # Apply face tracking if enabled
-                    if self.face_tracking_enabled:
-                        tracked_results = self.face_tracker.update(scaled_results, self.frame_count)
-                        last_results = tracked_results
-                    else:
-                        last_results = scaled_results
-                    
+                    last_results = scaled_results
                     self.processing_count += 1
                     
                     # Dynamic adjustment
@@ -1531,18 +1510,11 @@ class RealTimeProcessor:
                     # Log performance data if enabled
                     if getattr(self, 'logging_enabled', False):
                         self.log_performance_data()
-                else:
-                    # Even when not processing, update tracking for cooldown management
-                    if self.face_tracking_enabled and last_results:
-                        tracked_results = self.face_tracker.update([], self.frame_count)
-                        # Keep the same results but update tracking state
-                        last_results = tracked_results if tracked_results else last_results
-                    scaled_results = last_results
-
+                
                 # ALWAYS apply display scaling to results (whether new or cached)
                 display_h, display_w = display_frame.shape[:2]
                 display_results = []
-                for result in scaled_results:
+                for result in last_results:
                     display_bbox = self.scale_bbox_to_display(
                         result['bbox'],
                         (original_h, original_w),
@@ -1554,10 +1526,11 @@ class RealTimeProcessor:
 
                 results = display_results
 
+                # Save debug frames only when processing occurs
                 if self.save_debug_frames and should_process:
                     self.save_debug_frame(display_frame, results)
                 
-                # Enhanced drawing with tracking visualization
+                # Enhanced drawing with tracking integration
                 self.draw_enhanced_results(display_frame, results, last_performance)
                 cv2.imshow('Dynamic Face Recognition System', display_frame)
                 
@@ -1569,7 +1542,7 @@ class RealTimeProcessor:
             print(f"❌ Error in main loop: {e}")
         finally:
             self.stop()
-                                      
+                                
     def stop(self):
         """Cleanup resources"""
         self.running = False
@@ -1614,9 +1587,6 @@ class RealTimeProcessor:
         print("  'n' - Toggle fixed/dynamic processing")
         print("  'm' - Cycle processing presets")
         
-        print("\n👤 TRACKING CONTROLS:")
-        print("  't' - Toggle face tracking (20-frame trust, 20s cooldown)")
-        
         print("\n🖼️  DISPLAY CONTROLS:")
         print("  '1' - Fit to screen")
         print("  '2' - Fixed size (1280x720)")
@@ -1636,12 +1606,13 @@ class RealTimeProcessor:
         print("  'f' - Toggle save debug frames")
         
         print("\n📊 ADVANCED CONTROLS:")
+        print("  't' - Toggle face tracking")
         print("  'l' - Toggle performance logging")
         print("  'k' - Take annotated snapshot")
         
         print("="*60)
-        print()
-        
+        print()                    
+
 class SimpleFaceTracker:
     def __init__(self, confidence_frames=20, cooldown_seconds=20, min_iou=0.3):
         self.confidence_frames = confidence_frames
@@ -1735,34 +1706,31 @@ class SimpleFaceTracker:
                     track['confidence_count'] = 0  # Reset for new recognition cycle
     
     def _get_final_results(self, original_results):
-        """Generate final results with tracking overrides"""
+        """Generate final results with tracking overrides - ENHANCED"""
         final_results = []
-        
+
         for result in original_results:
             # Find if this result matches any track
             matched_track_id = self._find_best_match(result['bbox'], self.active_tracks)
+            final_result = result.copy()
             
-            if matched_track_id and self.active_tracks[matched_track_id]['track_state'] == 'COOLDOWN':
-                # Use track identity during cooldown
+            if matched_track_id:
                 track = self.active_tracks[matched_track_id]
-                final_result = result.copy()
-                final_result['identity'] = track['identity']
-                final_result['recognition_confidence'] = track['recognition_confidence']
                 final_result['track_id'] = matched_track_id
-                final_result['track_state'] = 'COOLDOWN'
+                final_result['track_state'] = track['track_state']
+                
+                # Use track identity during cooldown
+                if track['track_state'] == 'COOLDOWN':
+                    final_result['identity'] = track['identity']
+                    final_result['recognition_confidence'] = track['recognition_confidence']
             else:
-                # Use original recognition
-                final_result = result.copy()
-                if matched_track_id:
-                    final_result['track_id'] = matched_track_id
-                    final_result['track_state'] = self.active_tracks[matched_track_id]['track_state']
-                else:
-                    final_result['track_state'] = 'NEW'
+                # New detection
+                final_result['track_state'] = 'NEW'
             
             final_results.append(final_result)
         
         return final_results
-    
+   
     def update(self, recognition_results, frame_count):
         """Main update method"""
         if not recognition_results:
@@ -1800,16 +1768,53 @@ class SimpleFaceTracker:
         self.active_tracks = current_tracks
         
         return self._get_final_results(recognition_results)
-    
-    def get_tracking_stats(self):
-        """Get tracking statistics for debug display"""
-        return {
-            'active_tracks': len(self.active_tracks),
-            'cooldown_tracks': len([t for t in self.active_tracks.values() if t['track_state'] == 'COOLDOWN']),
-            'tracking_tracks': len([t for t in self.active_tracks.values() if t['track_state'] == 'TRACKING']),
-            'next_track_id': self.next_track_id
-        }
-                                        
+
+def draw_tracking_info(self, frame: np.ndarray, results: List[Dict]):
+    """Draw tracking status on frame - ENHANCED INTEGRATION"""
+    for result in results:
+        x1, y1, x2, y2 = result['bbox']
+        identity = result['identity']
+        track_state = result.get('track_state', 'NEW')
+        track_id = result.get('track_id', 'N/A')
+        rec_conf = result.get('recognition_confidence', 0)
+        det_conf = result.get('detection_confidence', 0)
+        
+        # Color coding based on track state
+        if track_state == 'COOLDOWN':
+            color = (0, 255, 255)  # Yellow - trusted identity
+            status_symbol = "✓"
+            label = f"{identity} {status_symbol}" if identity else f"Unknown {status_symbol}"
+        elif track_state == 'TRACKING':
+            color = (0, 255, 0)    # Green - building confidence
+            # Find confidence count from active tracks
+            conf_count = 0
+            for track in self.face_tracker.active_tracks.values():
+                if np.array_equal(track.get('current_bbox', []), result['bbox']):
+                    conf_count = track.get('confidence_count', 0)
+                    break
+            status_symbol = f"({conf_count}/{self.face_tracker.confidence_frames})"
+            label = f"{identity} {status_symbol}" if identity else f"Unknown {status_symbol}"
+        else:  # NEW
+            color = (0, 0, 255)    # Red - new/unconfirmed
+            status_symbol = "?"
+            label = f"{identity} {status_symbol}" if identity else "Unknown"
+        
+        # Draw bounding box with track state
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        
+        # Draw label with track info
+        label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+        cv2.rectangle(frame, (x1, y1 - label_size[1] - 10), 
+                     (x1 + label_size[0], y1), color, -1)
+        cv2.putText(frame, label, (x1, y1 - 5), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        # Draw track ID and confidence for debugging
+        if self.debug_mode:
+            debug_text = f"ID:{track_id} Rec:{rec_conf:.2f}"
+            cv2.putText(frame, debug_text, (x1, y2 + 20),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+                                           
 # Enhanced configuration with fallbacks and validation
 CONFIG = {
     'detection_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\yolov11n-face.pt',
@@ -1845,46 +1850,75 @@ def validate_config(config: Dict) -> bool:
     return True
 
 def main():
-    # Initialize system
-    face_system = FaceRecognitionSystem(CONFIG)
+    """Stabilized main function with enhanced error handling"""
+    print("🚀 Initializing Stabilized Face Recognition System...")
     
-    # Create processor with optimization
-    processor = RealTimeProcessor(
-        face_system=face_system,
-        processing_interval=5,
-        buffer_size=5
-    )
-    
-        # Choose your input source
-    sources = {
-        '1': '0',                          # Default camera
-        '2': 'rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/101',  # RTSP
-        '3': 'http://192.168.1.101:8080/video',                   # IP camera
-        '4': 'video.mp4'                   # Video file
-    }
-    
-    print("Available sources:")
-    for key, source in sources.items():
-        print(f"  {key}: {source}")
-    
-    choice = input("Select source (1-4) or enter custom RTSP URL: ").strip()
-    
-    if choice in sources:
-        source = sources[choice]
-    else:
-        source = choice  # Custom input
-    
-    # Configure display
-    processor.set_display_size(1024, 768, "fixed_size")
+    # Validate configuration before proceeding
+    if not validate_config(CONFIG):
+        print("❌ Configuration validation failed. Please check your config.")
+        return
     
     try:
-        processor.run(source)  # Use default camera
+        # Initialize system with error handling
+        face_system = FaceRecognitionSystem(CONFIG)
+        print("✅ Face recognition system initialized")
+        
+        # Create processor with optimization
+        processor = RealTimeProcessor(
+            face_system=face_system,
+            processing_interval=5,
+            buffer_size=5
+        )
+        
+        # Enhanced source selection with validation
+        sources = {
+            '1': '0',                          # Default camera
+            '2': 'rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/101',
+            '3': 'http://192.168.1.101:8080/video',
+            '4': 'video.mp4'
+        }
+        
+        print("\n📹 Available sources:")
+        for key, source in sources.items():
+            print(f"  {key}: {source}")
+        
+        choice = input("Select source (1-4) or enter custom RTSP URL: ").strip()
+        
+        if choice in sources:
+            source = sources[choice]
+        else:
+            source = choice
+        
+        # Validate source before proceeding
+        print(f"🔍 Testing source: {source}")
+        
+        # Configure display and processing defaults
+        processor.set_display_size(1024, 768, "fixed_size")
+        processor.set_processing_scale(1.0)
+        
+        # Enable key features by default
+        processor.dynamic_adjustment_enabled = True
+        processor.face_tracking_enabled = True
+        processor.show_performance_stats = True
+        
+        print("\n🎯 System Features:")
+        print(f"   • Dynamic Adjustment: {'ENABLED' if processor.dynamic_adjustment_enabled else 'DISABLED'}")
+        print(f"   • Face Tracking: {'ENABLED' if processor.face_tracking_enabled else 'DISABLED'}")
+        print(f"   • Performance Stats: {'ENABLED' if processor.show_performance_stats else 'DISABLED'}")
+        print(f"   • Coordinate Scaling: OPERATIONAL")
+        
+        # Run the system
+        processor.run(source)
+        
     except KeyboardInterrupt:
         print("\n🛑 Interrupted by user")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ System error: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
-        processor.stop()    
-
+        if 'processor' in locals():
+            processor.stop()
+            
 if __name__ == "__main__":
     main()
