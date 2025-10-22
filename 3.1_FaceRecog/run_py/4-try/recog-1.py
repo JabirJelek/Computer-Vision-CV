@@ -1775,16 +1775,16 @@ class SimpleFaceTracker:
 # Enhanced configuration with fallbacks and validation
 CONFIG = {
     'detection_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\yolov11n-face.pt',
-    'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\\person_folder1.3.json',
+    'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\\person_folder1.4.json',
     'detection_confidence': 0.6,
     'detection_iou': 0.5,
     'roi_padding': 10,
     'embedding_model': 'Facenet',
     'recognition_threshold': 0.5,
     'max_faces_per_frame': 10,  # Limit faces per frame
-    'min_face_size': 50,  # Minimum face size in pixels
+    'min_face_size': 30,  # Minimum face size in pixels
     'enable_face_tracking': True,  # Basic tracking between frames
-    'tracking_max_age': 5,  # Frames to keep tracking without detection
+    'tracking_max_age': 10,  # Frames to keep tracking without detection
 }
 
 def validate_config(config: Dict) -> bool:
