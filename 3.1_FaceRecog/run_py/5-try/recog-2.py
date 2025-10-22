@@ -12,8 +12,6 @@ from typing import Dict, List, Tuple, Optional
 import datetime
 import csv
 import onnxruntime as ort
-import cv2
-
 class FaceRecognitionSystem:
     def __init__(self, config: Dict):
         self.config = config
@@ -900,7 +898,7 @@ class RealTimeProcessor:
             except Exception as e:
                 print(f"🚨 Capture thread error: {e}")
                 time.sleep(1)
-
+                    
     def _reconnect_stream(self):
         """Enhanced stream reconnection with exponential backoff"""
         max_attempts = 10
@@ -1280,9 +1278,9 @@ class RealTimeProcessor:
             # Color coding based on mask status and recognition
             if identity:
                 if mask_status == "mask":
-                    color = (0, 255, 0)  # Yellow for recognized with maskq
+                    color = (0, 255, 0)  # Yellow for recognized without mask
                 else:
-                    color = (0, 255, 255)    # Green for recognized without mask
+                    color = (0, 255, 255)    # Green for recognized with mask
             else:
                 if mask_status == "mask":
                     color = (255, 255, 0)  # Cyan for unknown with mask
@@ -1921,9 +1919,9 @@ CONFIG = {
     'detection_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\yolov11n-face.pt',
     'mask_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\run_py\mask_detector112.onnx',  
     'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\person_folder1.4.json',
-    'detection_confidence': 0.6,
+    'detection_confidence': 0.5,
     'detection_iou': 0.5,
-    'mask_detection_threshold': 0.5,  
+    'mask_detection_threshold': 0.8,  
     'roi_padding': 10,
     'embedding_model': 'Facenet',
     'recognition_threshold': 0.5,
