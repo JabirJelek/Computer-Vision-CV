@@ -1775,7 +1775,7 @@ class SimpleFaceTracker:
 # Enhanced configuration with fallbacks and validation
 CONFIG = {
     'detection_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\yolov11n-face.pt',
-    'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\run_py\person_folder1.1.json',
+    'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\\person_folder1.3.json',
     'detection_confidence': 0.6,
     'detection_iou': 0.5,
     'roi_padding': 10,
