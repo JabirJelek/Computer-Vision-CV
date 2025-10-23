@@ -1,1 +1,0 @@
-timestamp,fps,processing_interval,processing_scale,faces_detected,faces_recognized,detection_time_avg,embedding_time_avg,recognition_time_avg,memory_usage
