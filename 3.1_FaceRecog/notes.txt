@@ -1,0 +1,61 @@
+Untuk rtsp link berikut
+
+1. rtsp://admin:ADMIN888@192.168.0.4:554/Streaming/Channels/101
+    dicoba dengan:
+        1. SCMA - 1 = Ok
+        2. SCMA - 3 = X
+        3. SCMA - 5 = X
+
+    Camera: 2, 5, 6, 7, dan 8, tidak responsif.
+
+    apabila disambungkan dengan SCMA - 1, TERKONEKSI.
+
+
+2. rtsp://admin:admin888@192.168.0.3:554/Streaming/Channels/101
+https://vps.scasda.my.id//actions/foto_pusat_data_unggah.php
+https://vps.scasda.my.id/actions/a_notifikasi_suara_speaker.php
+
+    Camera: 7, 15, 1
+
+
+    dicoba dengan:
+        1. SCMA - 1 = ok
+        2. SCMA - 3 = X
+        3. SCMA - 5 = X
+
+3. rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/101
+    Cuma sampai 8? akses 9 10 forbidden
+    dicoba dengan:
+        1. SCMA - 1 = Kesalahan password, seharusnya Admin888. bukan admin888. Ketika diganti,
+                        dapat terkoneksi
+        2. SCMA - 3 = X
+        3. SCMA - 5 = X
+
+
+++ For face recognition ++
+
+-Utilization of embedding load:
+# Load your pre-computed embeddings
+with open("face_embeddings_dataset.json", "r") as f:
+    all_embeddings = json.load(f)
+
+# Now you have instant access to all face data!
+for name, data in all_embeddings["embeddings"].items():
+    embedding_vector = data["embedding"]
+    # Use for recognition, matching, etc.
+
+-Simple recognition
+def who_is_this_person(image_path, embeddings_data, similarity_threshold=0.6):
+    query_embedding = create_embedding_for_image(image_path)
+    best_match = None
+    highest_similarity = 0
+    
+    for filename, data in embeddings_data["embeddings"].items():
+        stored_embedding = np.array(data["embedding"])
+        similarity = cosine_similarity(query_embedding, stored_embedding)
+        
+        if similarity > highest_similarity and similarity > similarity_threshold:
+            highest_similarity = similarity
+            best_match = filename
+    
+    return best_match, highest_similarity

@@ -30,3 +30,34 @@ https://vps.scasda.my.id/actions/a_notifikasi_suara_speaker.php
                         dapat terkoneksi
         2. SCMA - 3 = X
         3. SCMA - 5 = X
+
+
+
+
+++ For face recognition ++
+
+-Utilization of embedding load:
+# Load your pre-computed embeddings
+with open("face_embeddings_dataset.json", "r") as f:
+    all_embeddings = json.load(f)
+
+# Now you have instant access to all face data!
+for name, data in all_embeddings["embeddings"].items():
+    embedding_vector = data["embedding"]
+    # Use for recognition, matching, etc.
+
+-Simple recognition
+def who_is_this_person(image_path, embeddings_data, similarity_threshold=0.6):
+    query_embedding = create_embedding_for_image(image_path)
+    best_match = None
+    highest_similarity = 0
+    
+    for filename, data in embeddings_data["embeddings"].items():
+        stored_embedding = np.array(data["embedding"])
+        similarity = cosine_similarity(query_embedding, stored_embedding)
+        
+        if similarity > highest_similarity and similarity > similarity_threshold:
+            highest_similarity = similarity
+            best_match = filename
+    
+    return best_match, highest_similarity

@@ -5,3 +5,6 @@ capturedVideo/
 CV_model/ 
 2_IPEClassifier/DisplayModelCapabilities.log
 3_FaceRecog/database
+
+3.1_FaceRecog/run_py/cropped_faces
+3.1_FaceRecog/cropped_faces
