@@ -25,16 +25,16 @@ class FaceRecognitionSystem:
             'total_frames_processed': 0,
             'total_faces_detected': 0,
             'total_faces_recognized': 0,
-            'total_masks_detected': 0,  # NEW
+            'total_masks_detected': 0,  
             'detection_times': [],
-            'mask_detection_times': [],  # NEW
+            'mask_detection_times': [],  
             'embedding_times': [],
             'recognition_times': [],
             'last_processing_time': 0
         }
         
         self._load_models()
-        self._load_mask_detector()  # NEW METHOD
+        self._load_mask_detector()  
         self._load_embeddings_database()
 
     def _load_mask_detector(self):
@@ -87,12 +87,12 @@ class FaceRecognitionSystem:
             outputs = self.mask_detector.run([output_name], {input_name: input_data})
             predictions = outputs[0]
             
-            # Interpret results (assuming [no_mask_prob, mask_prob])
-            mask_confidence = float(predictions[0][1])  # Probability of mask
-            no_mask_confidence = float(predictions[0][0])  # Probability of no mask
+            # Interpret results (assuming [mask_prob, no_mask_prob])
+            mask_confidence = float(predictions[0][0])  # Probability of mask
+            no_mask_confidence = float(predictions[0][1])  # Probability of no mask
             
             # Determine mask status with threshold
-            mask_threshold = self.config.get('mask_detection_threshold', 0.5)
+            mask_threshold = self.config.get('mask_detection_threshold')
             
             if mask_confidence > mask_threshold:
                 mask_status = "mask"
@@ -1916,9 +1916,9 @@ class SimpleFaceTracker:
 # Enhanced configuration with fallbacks and validation
 # Enhanced configuration
 CONFIG = {
-    'detection_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\yolov11n-face.pt',
-    'mask_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\run_py\mask_detector112.onnx',  
-    'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\person_folder1.4.json',
+    'detection_model_path': r'D:\RaihanFarid\Dokumen\Object Detection\3.1_FaceRecog\yolov11n-face.pt',
+    'mask_model_path': r'D:\RaihanFarid\Dokumen\Object Detection\3.1_FaceRecog\run_py\mask_detector112.onnx',  
+    'embeddings_db_path': r'D:\RaihanFarid\Dokumen\Object Detection\3.1_FaceRecog\person_folder1.4.json',
     'detection_confidence': 0.5,
     'detection_iou': 0.5,
     'mask_detection_threshold': 0.8,  
