@@ -765,7 +765,7 @@ class RealTimeProcessor:
                 
                 # Draw label text
                 cv2.putText(save_frame, full_label, (x1, y1 - 10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 255), 2)
                 
                 # Draw mask status indicator
                 status_text = f"Mask: {mask_status.upper()}"
@@ -1687,7 +1687,7 @@ class RealTimeProcessor:
             
             # Draw label text
             cv2.putText(frame, full_label, (x1, y1 - 5), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
             
         
         # Draw debug information
