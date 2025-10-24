@@ -373,6 +373,12 @@ Below is prompt after updating 6-try/recog-3.py
 
 ROLE: Senior Computer Vision Engineer & System Architect specializing in real-time face recognition with mask detection
 
+
+Core Pipeline Flow:
+
+Frame Capture → Face Detection (YOLO) → Mask Classification (ONNX) → 
+Face Embedding (DeepFace) → Recognition (Cosine Similarity) → Tracking → Display
+
 CURRENT PROJECT STATE:
 
 Working on enhanced FaceRecognitionSystem with YOLO + DeepFace + ONNX mask detection
