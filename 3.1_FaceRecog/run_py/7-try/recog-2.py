@@ -686,7 +686,7 @@ class RealTimeProcessor:
             return False        
         
     def has_mask_violations(self, results: List[Dict]) -> bool:
-        """Check if frame contains mask violations"""
+        """Check if frame contains mask violations - INCLUDES UNKNOWN PEOPLE"""
         if not results:
             return False
         
@@ -694,14 +694,15 @@ class RealTimeProcessor:
             mask_status = result.get('mask_status')
             mask_conf = result.get('mask_confidence', 0)
             
-            # Log ANY person without mask, regardless of recognition
-            if mask_status == 'no_mask' and mask_conf > 0.6:
+            # Log ANY person without mask, regardless of recognition status
+            # Lowered confidence threshold from 0.6 to 0.5 to be less conservative
+            if mask_status == 'no_mask' and mask_conf > 0.5:
                 return True
         
-        return False        
-        
+        return False       
+            
     def save_annotated_frame(self, frame: np.ndarray, results: List[Dict], original_frame: np.ndarray = None):
-        """Save annotated frame with enhanced metadata overlay for mask violations"""
+        """Save annotated frame with bounding boxes, labels, and enhanced metadata overlay"""
         if not self.image_logging_enabled or not self.image_log_folder:
             return False
         
@@ -717,8 +718,60 @@ class RealTimeProcessor:
             return False
         
         try:
-            # Create a copy to avoid modifying the display frame
-            save_frame = frame.copy()
+            # Create a copy to draw on (use original frame if available for better quality)
+            if original_frame is not None:
+                save_frame = original_frame.copy()
+            else:
+                save_frame = frame.copy()
+            
+            # Draw bounding boxes and labels on the saved frame
+            for result in results:
+                x1, y1, x2, y2 = result['bbox']
+                identity = result['identity']
+                rec_conf = result.get('recognition_confidence', 0)
+                det_conf = result.get('detection_confidence', 0)
+                mask_status = result.get('mask_status', 'unknown')  
+                mask_conf = result.get('mask_confidence', 0.0)
+                
+                # Color coding based on mask status and recognition (same as display)
+                if identity:
+                    if mask_status == "mask":
+                        color = (0, 255, 0)  # Green for recognized with mask
+                    else:
+                        color = (0, 255, 255)  # Yellow for recognized without mask
+                else:
+                    if mask_status == "mask":
+                        color = (255, 255, 0)  # Cyan for unknown with mask
+                    else:
+                        color = (0, 0, 255)    # Red for unknown without mask
+                
+                # Draw bounding box
+                cv2.rectangle(save_frame, (x1, y1), (x2, y2), color, 3)
+                
+                # Prepare label with comprehensive information
+                if identity:
+                    base_label = f"{identity} (Rec:{rec_conf:.2f})"
+                else:
+                    base_label = f"Unknown (Det:{det_conf:.2f})"
+                
+                # Add mask status to label
+                mask_label = f" | Mask: {mask_status}({mask_conf:.2f})"
+                full_label = base_label + mask_label
+                
+                # Draw label background
+                label_size = cv2.getTextSize(full_label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
+                cv2.rectangle(save_frame, (x1, y1 - label_size[1] - 15), 
+                            (x1 + label_size[0], y1), color, -1)
+                
+                # Draw label text
+                cv2.putText(save_frame, full_label, (x1, y1 - 10), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                
+                # Draw mask status indicator
+                status_text = f"Mask: {mask_status.upper()}"
+                status_color = (0, 255, 0) if mask_status == "mask" else (0, 0, 255)
+                cv2.putText(save_frame, status_text, (x1, y2 + 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
             
             # Enhanced metadata overlay
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -726,39 +779,49 @@ class RealTimeProcessor:
             
             # Add comprehensive header
             header_text = f"MASK VIOLATION - {timestamp}"
-            cv2.putText(save_frame, header_text, (20, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            cv2.putText(save_frame, header_text, (20, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
             
             # Add system info
             fps_text = f"FPS: {self.fps:.1f} | Scale: {self.current_processing_scale:.2f}"
-            cv2.putText(save_frame, fps_text, (20, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            cv2.putText(save_frame, fps_text, (20, 80),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             
-            # Add violation details
-            violations = [r for r in results if r.get('mask_status') == 'no_mask' and r.get('identity')]
-            violation_text = f"Violations: {len(violations)}"
-            cv2.putText(save_frame, violation_text, (20, 85),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+            # Add violation summary
+            violations = [r for r in results if r.get('mask_status') == 'no_mask']
+            violation_text = f"Violations: {len(violations)} | Total Faces: {len(results)}"
+            cv2.putText(save_frame, violation_text, (20, 120),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             
-            # Add individual violation info
-            for i, violation in enumerate(violations[:3]):  # Max 3 to avoid clutter
-                person_info = f"{violation['identity']} ({violation['mask_confidence']:.2f})"
-                cv2.putText(save_frame, person_info, (20, 110 + i * 25),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+            # Add resolution info
+            h, w = save_frame.shape[:2]
+            res_text = f"Resolution: {w}x{h}"
+            cv2.putText(save_frame, res_text, (20, 160),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             
-            # Generate filename
-            filename = f"violation_{filename_time}_{self.saved_image_count:04d}.jpeg"
+            # Draw violation counter on top right
+            counter_text = f"#{self.saved_image_count + 1:04d}"
+            counter_size = cv2.getTextSize(counter_text, cv2.FONT_HERSHEY_SIMPLEX, 1.5, 3)[0]
+            cv2.putText(save_frame, counter_text, 
+                    (w - counter_size[0] - 20, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
+            
+            # Generate filename with violation count
+            filename = f"violation_{filename_time}_{self.saved_image_count + 1:04d}.jpeg"
             filepath = self.image_log_folder / filename
             
-            # Save as jpeg 
-            success = cv2.imwrite(str(filepath), save_frame)
+            # Save as high-quality JPEG
+            success = cv2.imwrite(str(filepath), save_frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
             
             if success:
                 self.saved_image_count += 1
                 self.last_image_save_time = current_time
                 
-                if self.saved_image_count % 10 == 0:  # Periodic feedback
-                    print(f"🖼️  Saved {self.saved_image_count} violation images")
+                # Print detailed save information
+                print(f"🖼️  Saved violation image #{self.saved_image_count}: {filename}")
+                print(f"   - Faces: {len(results)}, Violations: {len(violations)}")
+                print(f"   - Resolution: {w}x{h}")
+                print(f"   - Path: {filepath}")
                 
                 return True
             else:
@@ -767,8 +830,10 @@ class RealTimeProcessor:
                 
         except Exception as e:
             print(f"❌ Error saving annotated frame: {e}")
-            return False        
-        
+            import traceback
+            traceback.print_exc()
+            return False
+            
     def analyze_detection_performance(self, results: List[Dict], original_frame_shape: Tuple[int, int]) -> Dict:
         """Comprehensive analysis of detection performance for dynamic adjustment"""
         performance = {
@@ -1947,9 +2012,9 @@ class RealTimeProcessor:
             display_results.append(display_result)
         
         return display_results
-        
+            
     def debug_logging_flow(self, results: List[Dict]):
-        """Debug why images aren't being logged"""
+        """Enhanced debug why images aren't being logged"""
         if not self.logging_enabled:
             print("🔴 LOGGING DISABLED - Press 'l' to enable")
             return
@@ -1958,7 +2023,8 @@ class RealTimeProcessor:
             print("🔴 IMAGE LOGGING DISABLED")
             return
         
-        print(f"🔄 Processing Count: {self.processing_count}, Log Interval: {self.log_interval}")
+        print(f"🔄 Processing Count: {self.processing_count}, Log Interval: {self.log_interval}, Image Interval: {self.image_log_interval}")
+        print(f"🖼️  Saved so far: {self.saved_image_count}/{self.max_images_per_session}")
         
         # Check if we're due for logging
         if self.processing_count % self.log_interval != 0:
@@ -1971,6 +2037,7 @@ class RealTimeProcessor:
         
         print(f"📊 Found {len(results)} face(s) in frame")
         
+        has_violation = False
         for i, result in enumerate(results):
             identity = result.get('identity', 'Unknown')
             mask_status = result.get('mask_status', 'unknown')
@@ -1979,26 +2046,47 @@ class RealTimeProcessor:
             print(f"  Face {i+1}: {identity}, Mask: {mask_status}({mask_conf:.2f})")
             
             # Check violation conditions
-            is_violation = (mask_status == 'no_mask' and mask_conf > 0.6)
+            is_violation = (mask_status == 'no_mask' and mask_conf > 0.5)  # Lowered threshold
             is_recognized = (identity is not None and identity != "Unknown")
             
             if is_violation:
+                has_violation = True
                 if is_recognized:
                     print(f"  ✅ VIOLATION DETECTED: {identity} without mask!")
                 else:
-                    print(f"  ⚠️  Unknown person without mask - NOT LOGGING (identity required)")
+                    print(f"  ✅ VIOLATION DETECTED: Unknown person without mask!")
             else:
                 if mask_status == 'mask':
                     print(f"  ✅ Mask worn properly")
+                elif mask_status == 'unknown':
+                    print(f"  ❓ Unknown mask status")
                 else:
-                    print(f"  ❓ Unknown mask status or low confidence")
+                    print(f"  ❓ Low mask confidence: {mask_conf:.2f}")
         
         # Check the actual violation method
-        has_violations = self.has_mask_violations(results)
-        print(f"🎯 has_mask_violations() returned: {has_violations}")    
-    
-    def log_performance_data(self, results: List[Dict], display_frame: np.ndarray = None):
-        """Enhanced logging with debugging"""
+        has_violations_method = self.has_mask_violations(results)
+        print(f"🎯 has_mask_violations() returned: {has_violations_method}")
+        
+        # Check image logging conditions
+        if has_violations_method:
+            current_time = time.time()
+            time_since_last = current_time - self.last_image_save_time
+            due_for_image = (self.processing_count % self.image_log_interval == 0)
+            within_limits = (self.saved_image_count < self.max_images_per_session)
+            time_ok = (time_since_last >= self.min_save_interval)
+            
+            print(f"📸 Image logging conditions:")
+            print(f"   - Due for image: {due_for_image} (count % {self.image_log_interval} == 0)")
+            print(f"   - Within limits: {within_limits} ({self.saved_image_count}/{self.max_images_per_session})")
+            print(f"   - Time OK: {time_ok} ({time_since_last:.1f}s >= {self.min_save_interval}s)")
+            
+            if due_for_image and within_limits and time_ok:
+                print("🎯 ALL CONDITIONS MET - Image should be saved!")
+            else:
+                print("⏰ Some conditions not met for image saving")
+                    
+    def log_performance_data(self, results: List[Dict], display_frame: np.ndarray = None, original_frame: np.ndarray = None):
+        """Enhanced logging with debugging and better violation detection"""
         if not self.logging_enabled:
             return
         
@@ -2010,21 +2098,40 @@ class RealTimeProcessor:
         self.debug_logging_flow(results)
         
         try:
+            # CSV logging: Write entries for recognized faces
             log_entries = self.collect_log_data(results)
             
-            # Image logging: Save frame if mask violations detected
-            if (self.image_logging_enabled and display_frame is not None and 
+            # Image logging: Save frame if mask violations detected (ANY person)
+            if (self.image_logging_enabled and 
                 self.has_mask_violations(results)):
+                
                 print("🚨 ATTEMPTING TO SAVE VIOLATION IMAGE")
-                success = self.save_annotated_frame(display_frame, results)
-                if success:
-                    print(f"✅ Image saved successfully! Total: {self.saved_image_count}")
+                
+                # Check if we're due for image logging based on interval
+                if (self.processing_count % self.image_log_interval == 0 and
+                    self.saved_image_count < self.max_images_per_session):
+                    
+                    current_time = time.time()
+                    # Check minimum time between saves
+                    if current_time - self.last_image_save_time >= self.min_save_interval:
+                        # Use original_frame if available, otherwise use display_frame
+                        frame_to_save = original_frame if original_frame is not None else display_frame
+                        if frame_to_save is not None:
+                            success = self.save_annotated_frame(display_frame, results, frame_to_save)
+                            if success:
+                                print(f"✅ Image saved successfully! Total: {self.saved_image_count}")
+                            else:
+                                print("❌ Failed to save image")
+                        else:
+                            print("❌ No frame available for saving")
+                    else:
+                        print(f"⏰ Image save skipped - too soon since last save: {current_time - self.last_image_save_time:.1f}s")
                 else:
-                    print("❌ Failed to save image")
+                    print(f"⏰ Image save skipped - interval or limit: count={self.saved_image_count}, interval={self.image_log_interval}")
             else:
                 print("ℹ️  No image saved - conditions not met")
             
-            # CSV logging: Write entries for recognized faces
+            # CSV logging
             if log_entries:
                 self.write_log_entries(log_entries)
                 print(f"📝 CSV: Logged {len(log_entries)} face entries")
@@ -2035,7 +2142,7 @@ class RealTimeProcessor:
                     
         except Exception as e:
             print(f"❌ Enhanced logging error: {e}")
-                            
+                                            
     def run(self, source: str = "0"):
         """Main loop with enhanced image logging"""
         try:
@@ -2088,7 +2195,7 @@ class RealTimeProcessor:
                         scaled_results.append(scaled_result)
 
                     # Enhanced logging with image support
-                    self.log_performance_data(scaled_results, display_frame)  # Pass display_frame for image logging
+                    self.log_performance_data(scaled_results, display_frame, original_frame) # Pass display_frame for image logging
                     
                     last_results = scaled_results
                     self.processing_count += 1
@@ -2403,10 +2510,10 @@ CONFIG = {
     'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\peson_folder_1.json',
     'detection_confidence': 0.5,
     'detection_iou': 0.5,
-    'mask_detection_threshold': 0.8,  
-    'roi_padding': 10,  
+    'mask_detection_threshold': 0.6,  
+    'roi_padding': 15,  
     'embedding_model': 'Facenet',
-    'recognition_threshold': 0.5,
+    'recognition_threshold': 0.4,  
     'max_faces_per_frame': 10,
     'min_face_size': 40,  
     'enable_face_tracking': True,
