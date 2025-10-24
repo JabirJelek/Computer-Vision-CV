@@ -2166,12 +2166,12 @@ class SimpleFaceTracker:
                                  
 # Update your CONFIG dictionary:
 CONFIG = {
-    'detection_model_path': r'D:\RaihanFarid\Dokumen\Object Detection\3.1_FaceRecog\yolov11n-face.pt',
-    'mask_model_path': r'D:\RaihanFarid\Dokumen\Object Detection\3.1_FaceRecog\run_py\mask_detector224.onnx',  
-    'embeddings_db_path': r'D:\RaihanFarid\Dokumen\Object Detection\3.1_FaceRecog\person_folder1.4.json',
+    'detection_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\yolov11n-face.pt',
+    'mask_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\run_py\mask_detector224.onnx',  
+    'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\person_folder1.5.json',
     'detection_confidence': 0.5,
     'detection_iou': 0.5,
-    'mask_detection_threshold': 0.95,  # LOWERED for better sensitivity tuning
+    'mask_detection_threshold': 0.99,  
     'roi_padding': 15,  # Increased for better mask detection
     'embedding_model': 'Facenet',
     'recognition_threshold': 0.5,
