@@ -29,6 +29,525 @@ from collections import defaultdict, deque
 from typing import Dict, List, Tuple, Optional, Any
 import time
 
+import cv2
+import numpy as np
+from collections import deque
+from typing import Dict, List, Tuple, Optional
+
+class SceneContextAnalyzer:
+    """Advanced scene context analysis for intelligent scaling decisions"""
+    
+    def __init__(self, config: Dict):
+        self.config = config
+        self.previous_frame = None
+        self.motion_history = deque(maxlen=30)
+        self.context_history = deque(maxlen=50)
+        
+        # Context thresholds
+        self.thresholds = {
+            'high_face_density': 0.05,  # faces per 1000 pixels
+            'low_face_density': 0.005,
+            'high_complexity': 0.6,
+            'low_complexity': 0.2,
+            'dark_lighting': 0.3,
+            'bright_lighting': 0.7,
+            'high_motion': 0.4,
+            'low_motion': 0.1
+        }
+        
+        print("🎯 Scene Context Analyzer initialized")
+
+    def analyze_scene_context(self, frame: np.ndarray, detection_results: List[Dict]) -> Dict[str, float]:
+        """Comprehensive scene context analysis"""
+        if frame is None or frame.size == 0:
+            return self._get_default_context()
+        
+        try:
+            # Convert to grayscale for analysis
+            if len(frame.shape) == 3:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = frame
+            
+            h, w = gray.shape
+            
+            context = {
+                'face_density': self._calculate_face_density(detection_results, w, h),
+                'scene_complexity': self._calculate_scene_complexity(gray),
+                'lighting_conditions': self._assess_lighting_conditions(gray),
+                'motion_level': self._estimate_motion_level(gray),
+                'texture_density': self._calculate_texture_density(gray),
+                'edge_concentration': self._calculate_edge_concentration(gray),
+                'color_variance': self._calculate_color_variance(frame),
+                'focus_quality': self._assess_focus_quality(gray)
+            }
+            
+            # Store context for trend analysis
+            self.context_history.append(context)
+            
+            return context
+            
+        except Exception as e:
+            print(f"❌ Scene context analysis error: {e}")
+            return self._get_default_context()
+
+    def _calculate_face_density(self, results: List[Dict], frame_width: int, frame_height: int) -> float:
+        """Calculate face density in the scene"""
+        if not results:
+            return 0.0
+        
+        total_face_area = 0
+        for result in results:
+            x1, y1, x2, y2 = result['bbox']
+            face_area = (x2 - x1) * (y2 - y1)
+            total_face_area += face_area
+        
+        frame_area = frame_width * frame_height
+        density = total_face_area / frame_area if frame_area > 0 else 0.0
+        
+        return min(1.0, density * 10)  # Normalize to 0-1 range
+
+    def _calculate_scene_complexity(self, gray_frame: np.ndarray) -> float:
+        """Calculate scene complexity using edge density and variance"""
+        try:
+            # Edge detection
+            edges = cv2.Canny(gray_frame, 50, 150)
+            edge_density = np.sum(edges > 0) / edges.size
+            
+            # Texture analysis using variance
+            laplacian_var = cv2.Laplacian(gray_frame, cv2.CV_64F).var()
+            texture_complexity = min(1.0, laplacian_var / 1000.0)
+            
+            # Combined complexity score
+            complexity = 0.6 * edge_density + 0.4 * texture_complexity
+            return min(1.0, complexity)
+            
+        except:
+            return 0.5
+
+    def _assess_lighting_conditions(self, gray_frame: np.ndarray) -> float:
+        """Assess lighting conditions (0=dark, 1=bright)"""
+        try:
+            brightness = np.mean(gray_frame) / 255.0
+            
+            # Calculate contrast
+            contrast = np.std(gray_frame) / 128.0  # Normalized
+            
+            # Combined lighting score (prioritize adequate lighting)
+            if 0.3 <= brightness <= 0.7:
+                lighting_score = 0.8 + (0.2 * contrast)  # Good lighting
+            else:
+                lighting_score = brightness * contrast  # Poor lighting
+            
+            return min(1.0, lighting_score)
+            
+        except:
+            return 0.5
+
+    def _estimate_motion_level(self, current_gray: np.ndarray) -> float:
+        """Estimate motion level between consecutive frames"""
+        try:
+            if self.previous_frame is None:
+                self.previous_frame = current_gray
+                return 0.0
+            
+            # Calculate frame difference
+            frame_diff = cv2.absdiff(self.previous_frame, current_gray)
+            motion_level = np.mean(frame_diff) / 255.0
+            
+            # Update previous frame
+            self.previous_frame = current_gray
+            
+            # Store in history for smoothing
+            self.motion_history.append(motion_level)
+            
+            # Use moving average for stability
+            if len(self.motion_history) > 0:
+                smoothed_motion = np.mean(list(self.motion_history))
+                return min(1.0, smoothed_motion * 3)  # Amplify for better sensitivity
+            
+            return motion_level
+            
+        except:
+            return 0.0
+
+    def _calculate_texture_density(self, gray_frame: np.ndarray) -> float:
+        """Calculate texture density using local binary patterns (simplified)"""
+        try:
+            # Use variance of Gaussian blur differences as texture indicator
+            blur1 = cv2.GaussianBlur(gray_frame, (5, 5), 0)
+            blur2 = cv2.GaussianBlur(gray_frame, (9, 9), 0)
+            texture_map = cv2.absdiff(blur1, blur2)
+            texture_density = np.mean(texture_map) / 255.0
+            return min(1.0, texture_density * 2)
+        except:
+            return 0.5
+
+    def _calculate_edge_concentration(self, gray_frame: np.ndarray) -> float:
+        """Calculate edge concentration in different regions"""
+        try:
+            edges = cv2.Canny(gray_frame, 50, 150)
+            h, w = edges.shape
+            
+            # Divide frame into 3x3 grid and analyze edge distribution
+            grid_h, grid_w = h // 3, w // 3
+            edge_concentrations = []
+            
+            for i in range(3):
+                for j in range(3):
+                    roi = edges[i*grid_h:(i+1)*grid_h, j*grid_w:(j+1)*grid_w]
+                    concentration = np.sum(roi > 0) / roi.size
+                    edge_concentrations.append(concentration)
+            
+            # Use standard deviation of concentrations as measure of focus
+            concentration_variance = np.std(edge_concentrations)
+            return min(1.0, concentration_variance * 5)
+        except:
+            return 0.5
+
+    def _calculate_color_variance(self, color_frame: np.ndarray) -> float:
+        """Calculate color variance in the scene"""
+        try:
+            if len(color_frame.shape) != 3:
+                return 0.5
+                
+            hsv = cv2.cvtColor(color_frame, cv2.COLOR_BGR2HSV)
+            saturation = hsv[:, :, 1]
+            color_variance = np.std(saturation) / 255.0
+            return min(1.0, color_variance * 2)
+        except:
+            return 0.5
+
+    def _assess_focus_quality(self, gray_frame: np.ndarray) -> float:
+        """Assess image focus quality using frequency analysis"""
+        try:
+            # Use FFT to assess focus (blurry images have less high frequency content)
+            fft = np.fft.fft2(gray_frame)
+            fft_shift = np.fft.fftshift(fft)
+            magnitude = np.log(np.abs(fft_shift) + 1)
+            
+            # High frequency content (edges)
+            h, w = magnitude.shape
+            center_h, center_w = h // 2, w // 2
+            high_freq_region = magnitude[center_h-20:center_h+20, center_w-20:center_w+20]
+            high_freq_content = np.mean(high_freq_region)
+            
+            focus_quality = min(1.0, high_freq_content / 8.0)  # Normalize
+            return focus_quality
+        except:
+            return 0.5
+
+    def get_context_recommendations(self, context: Dict[str, float]) -> Dict[str, any]:
+        """Get scaling recommendations based on scene context"""
+        recommendations = {
+            'suggested_scale_adjustment': 1.0,
+            'reasoning': [],
+            'priority_factors': {}
+        }
+        
+        # Face density recommendations
+        if context['face_density'] > self.thresholds['high_face_density']:
+            recommendations['suggested_scale_adjustment'] *= 1.3
+            recommendations['reasoning'].append("High face density - increase resolution")
+            recommendations['priority_factors']['face_density'] = 'high'
+        elif context['face_density'] < self.thresholds['low_face_density']:
+            recommendations['suggested_scale_adjustment'] *= 0.8
+            recommendations['reasoning'].append("Low face density - can reduce resolution")
+            recommendations['priority_factors']['face_density'] = 'low'
+        else:
+            recommendations['priority_factors']['face_density'] = 'medium'
+
+        # Scene complexity recommendations
+        if context['scene_complexity'] > self.thresholds['high_complexity']:
+            recommendations['suggested_scale_adjustment'] *= 0.7
+            recommendations['reasoning'].append("Complex scene - reduce resolution for performance")
+            recommendations['priority_factors']['complexity'] = 'high'
+        elif context['scene_complexity'] < self.thresholds['low_complexity']:
+            recommendations['suggested_scale_adjustment'] *= 1.2
+            recommendations['reasoning'].append("Simple scene - can increase resolution")
+            recommendations['priority_factors']['complexity'] = 'low'
+        else:
+            recommendations['priority_factors']['complexity'] = 'medium'
+
+        # Lighting condition recommendations
+        if context['lighting_conditions'] < self.thresholds['dark_lighting']:
+            recommendations['suggested_scale_adjustment'] *= 1.4
+            recommendations['reasoning'].append("Poor lighting - increase resolution for detail")
+            recommendations['priority_factors']['lighting'] = 'poor'
+        elif context['lighting_conditions'] > self.thresholds['bright_lighting']:
+            recommendations['suggested_scale_adjustment'] *= 1.1
+            recommendations['reasoning'].append("Bright lighting - slight increase for overexposure compensation")
+            recommendations['priority_factors']['lighting'] = 'bright'
+        else:
+            recommendations['priority_factors']['lighting'] = 'good'
+
+        # Motion level recommendations
+        if context['motion_level'] > self.thresholds['high_motion']:
+            recommendations['suggested_scale_adjustment'] *= 0.6
+            recommendations['reasoning'].append("High motion - reduce resolution for stability")
+            recommendations['priority_factors']['motion'] = 'high'
+        elif context['motion_level'] < self.thresholds['low_motion']:
+            recommendations['suggested_scale_adjustment'] *= 1.1
+            recommendations['reasoning'].append("Low motion - can increase resolution")
+            recommendations['priority_factors']['motion'] = 'low'
+        else:
+            recommendations['priority_factors']['motion'] = 'medium'
+
+        # Focus quality recommendations
+        if context['focus_quality'] < 0.3:
+            recommendations['suggested_scale_adjustment'] *= 0.8
+            recommendations['reasoning'].append("Poor focus - reducing resolution won't help")
+            recommendations['priority_factors']['focus'] = 'poor'
+        elif context['focus_quality'] > 0.7:
+            recommendations['suggested_scale_adjustment'] *= 1.2
+            recommendations['reasoning'].append("Good focus - increase resolution for detail")
+            recommendations['priority_factors']['focus'] = 'good'
+        else:
+            recommendations['priority_factors']['focus'] = 'medium'
+
+        return recommendations
+
+    def _get_default_context(self) -> Dict[str, float]:
+        """Return default context when analysis fails"""
+        return {
+            'face_density': 0.0,
+            'scene_complexity': 0.5,
+            'lighting_conditions': 0.5,
+            'motion_level': 0.0,
+            'texture_density': 0.5,
+            'edge_concentration': 0.5,
+            'color_variance': 0.5,
+            'focus_quality': 0.5
+        }
+
+    def get_context_statistics(self) -> Dict[str, any]:
+        """Get statistics about historical context analysis"""
+        if not self.context_history:
+            return {}
+        
+        contexts = list(self.context_history)
+        stats = {}
+        
+        for key in contexts[0].keys():
+            values = [ctx[key] for ctx in contexts]
+            stats[key] = {
+                'mean': np.mean(values),
+                'std': np.std(values),
+                'min': np.min(values),
+                'max': np.max(values),
+                'trend': 'increasing' if values[-1] > values[0] else 'decreasing'
+            }
+        
+        return stats
+
+class ContextAwareDynamicScaling:
+    """Dynamic scaling enhanced with scene context awareness"""
+    
+    def __init__(self, config: Dict):
+        self.config = config
+        self.scene_analyzer = SceneContextAnalyzer(config)
+        
+        # Scaling parameters
+        self.scaling_params = {
+            'min_scale': config.get('min_processing_scale', 0.3),
+            'max_scale': config.get('max_processing_scale', 2.5),
+            'base_step': config.get('scale_adjustment_step', 0.1),
+            'context_weight': config.get('context_weight', 0.4),  # How much context influences scaling
+            'performance_weight': config.get('performance_weight', 0.6)
+        }
+        
+        # Historical data
+        self.scaling_decisions = deque(maxlen=100)
+        self.performance_history = deque(maxlen=50)
+        self.context_recommendations_history = deque(maxlen=50)
+        
+        self.current_scale = 1.0
+        self.adjustment_cooldown = 0
+        
+        print("🎯 Context-Aware Dynamic Scaling initialized")
+
+    def compute_optimal_scale(self, frame: np.ndarray, detection_results: List[Dict], 
+                            performance_metrics: Dict) -> float:
+        """Compute optimal scale using both performance and context"""
+        
+        # Analyze scene context
+        scene_context = self.scene_analyzer.analyze_scene_context(frame, detection_results)
+        context_recommendations = self.scene_analyzer.get_context_recommendations(scene_context)
+        
+        # Store for analysis
+        self.context_recommendations_history.append({
+            'context': scene_context,
+            'recommendations': context_recommendations,
+            'timestamp': time.time()
+        })
+        
+        # Calculate performance-based scale
+        performance_scale = self._calculate_performance_scale(performance_metrics)
+        
+        # Calculate context-based scale
+        context_scale = self._calculate_context_scale(context_recommendations)
+        
+        # Combine with weights
+        optimal_scale = (
+            performance_scale * self.scaling_params['performance_weight'] +
+            context_scale * self.scaling_params['context_weight']
+        )
+        
+        # Apply predictive adjustments
+        optimal_scale = self._apply_predictive_adjustments(optimal_scale, scene_context)
+        
+        # Apply bounds
+        optimal_scale = max(self.scaling_params['min_scale'], 
+                           min(self.scaling_params['max_scale'], optimal_scale))
+        
+        # Record decision
+        decision = {
+            'timestamp': time.time(),
+            'performance_scale': performance_scale,
+            'context_scale': context_scale,
+            'optimal_scale': optimal_scale,
+            'previous_scale': self.current_scale,
+            'context': scene_context,
+            'performance': performance_metrics,
+            'recommendations': context_recommendations
+        }
+        self.scaling_decisions.append(decision)
+        self.performance_history.append(performance_metrics)
+        
+        return optimal_scale
+
+    def _calculate_performance_scale(self, performance: Dict) -> float:
+        """Calculate scale based on performance metrics"""
+        base_scale = 1.0
+        
+        # Face detection performance
+        if performance['detection_count'] == 0:
+            # No detections - try higher resolution
+            base_scale *= 1.5
+        elif performance['avg_face_size'] < 40:
+            # Small faces - increase resolution
+            size_ratio = 40 / max(performance['avg_face_size'], 1)
+            base_scale *= min(2.0, 1.0 + (size_ratio - 1) * 0.1)
+        
+        # Detection quality
+        if performance['detection_quality'] < 0.4:
+            base_scale *= 1.3  # Poor quality - try higher resolution
+        elif performance['detection_quality'] > 0.8:
+            base_scale *= 0.8  # Excellent quality - can reduce resolution
+        
+        return base_scale
+
+    def _calculate_context_scale(self, recommendations: Dict) -> float:
+        """Calculate scale based on scene context recommendations"""
+        return recommendations.get('suggested_scale_adjustment', 1.0)
+
+    def _apply_predictive_adjustments(self, current_scale: float, context: Dict) -> float:
+        """Apply predictive adjustments based on context patterns"""
+        if len(self.scaling_decisions) < 5:
+            return current_scale
+        
+        # Analyze historical success with similar contexts
+        similar_contexts = []
+        for decision in self.scaling_decisions:
+            context_similarity = self._calculate_context_similarity(context, decision['context'])
+            if context_similarity > 0.7:  # Similar context
+                performance_improvement = self._calculate_performance_improvement(decision)
+                similar_contexts.append((decision['optimal_scale'], performance_improvement))
+        
+        if similar_contexts:
+            # Find the scale that gave best performance in similar contexts
+            best_scale, best_improvement = max(similar_contexts, key=lambda x: x[1])
+            
+            if best_improvement > 0.1:  # Significant improvement
+                # Blend with historical best (30% weight)
+                adjusted_scale = current_scale * 0.7 + best_scale * 0.3
+                return adjusted_scale
+        
+        return current_scale
+
+    def _calculate_context_similarity(self, ctx1: Dict, ctx2: Dict) -> float:
+        """Calculate similarity between two context profiles"""
+        similarity = 0.0
+        weights = {
+            'face_density': 0.3,
+            'scene_complexity': 0.2,
+            'lighting_conditions': 0.2,
+            'motion_level': 0.15,
+            'focus_quality': 0.15
+        }
+        
+        for key, weight in weights.items():
+            if key in ctx1 and key in ctx2:
+                diff = abs(ctx1[key] - ctx2[key])
+                similarity += weight * (1.0 - diff)
+        
+        return similarity
+
+    def _calculate_performance_improvement(self, decision: Dict) -> float:
+        """Calculate performance improvement from a scaling decision"""
+        if 'performance' not in decision:
+            return 0.0
+        
+        perf = decision['performance']
+        # Simple improvement metric based on detection quality and count
+        improvement = perf.get('detection_quality', 0) * 0.7 + \
+                     min(1.0, perf.get('detection_count', 0) / 10) * 0.3
+        return improvement
+
+    def apply_scale_adjustment(self, new_scale: float) -> bool:
+        """Apply scale adjustment with cooldown and validation"""
+        if self.adjustment_cooldown > 0:
+            self.adjustment_cooldown -= 1
+            return False
+        
+        scale_change = abs(new_scale - self.current_scale)
+        
+        # Only apply significant changes
+        if scale_change >= self.scaling_params['base_step'] * 0.5:
+            old_scale = self.current_scale
+            self.current_scale = new_scale
+            self.adjustment_cooldown = 5  # Cooldown period
+            
+            # Log the adjustment
+            print(f"🎯 Context-aware scaling: {old_scale:.2f} → {new_scale:.2f}")
+            
+            # Print context reasoning if available
+            if self.context_recommendations_history:
+                latest_rec = self.context_recommendations_history[-1]['recommendations']
+                for reason in latest_rec.get('reasoning', [])[:2]:  # Show top 2 reasons
+                    print(f"   📋 {reason}")
+            
+            return True
+        
+        return False
+
+    def get_scaling_statistics(self) -> Dict:
+        """Get scaling statistics and insights"""
+        stats = {
+            'current_scale': self.current_scale,
+            'total_decisions': len(self.scaling_decisions),
+            'average_scale': 0.0,
+            'context_influence': self.scaling_params['context_weight'],
+            'recent_context_stats': self.scene_analyzer.get_context_statistics()
+        }
+        
+        if self.scaling_decisions:
+            scales = [d['optimal_scale'] for d in self.scaling_decisions]
+            stats['average_scale'] = np.mean(scales)
+            stats['scale_variance'] = np.var(scales)
+        
+        # Most common context recommendations
+        if self.context_recommendations_history:
+            recent_recs = list(self.context_recommendations_history)[-10:]  # Last 10
+            common_reasons = {}
+            for rec in recent_recs:
+                for reason in rec['recommendations'].get('reasoning', []):
+                    common_reasons[reason] = common_reasons.get(reason, 0) + 1
+            
+            stats['common_recommendations'] = common_reasons
+        
+        return stats
+
 class EnhancedSimilarityEngine:
     def __init__(self, config: Dict):
         self.config = config
@@ -1928,7 +2447,7 @@ class FaceRecognitionSystem:
             
             face_roi = frame[y1_pad:y2_pad, x1_pad:x2_pad]
             
-            # ENHANCED: Better ROI validation
+            # Better ROI validation
             if (face_roi.size == 0 or face_roi.shape[0] < 40 or face_roi.shape[1] < 40 or
                 np.std(face_roi) < 10):  # Check for low contrast
                 continue
@@ -2060,20 +2579,22 @@ class RobustFaceRecognitionSystem(FaceRecognitionSystem):
         self.threshold_manager = AdaptiveThresholdManager(config)
         
         # Quality-adaptive engine
-        self.similarity_engine = QualityAdaptiveSimilarityEngine(config)
+        self.similarity_engine = BalancedSimilarityEngine(config)
         
-        # Enhanced configuration - FIXED: Add missing robust_config
+        # Enhanced configuration
         self.robust_config = {
             'enable_multi_scale': config.get('enable_multi_scale', True),
             'enable_temporal_fusion': config.get('enable_temporal_fusion', True),
             'enable_quality_aware': config.get('enable_quality_aware', True),
-            'enable_quality_adaptive_similarity': config.get('enable_quality_adaptive_similarity', True),
+            'enable_balanced_similarity': True,  # 🆕 New flag
             'min_face_quality': config.get('min_face_quality', 0.3),
             'temporal_buffer_size': config.get('temporal_buffer_size', 10),
         }
         
-        # Initialize for statistics - FIXED: Add missing last_results
+        # Initialize for statistics
         self.last_results = []
+        
+        print("🎯 Robust Face Recognition with BALANCED similarity engine")
               
     def process_frame_robust(self, frame: np.ndarray) -> List[Dict]:
         """Enhanced robust processing with quality-adaptive similarity"""
@@ -2244,6 +2765,46 @@ class RobustFaceRecognitionSystem(FaceRecognitionSystem):
         center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
         return hash(f"{center_x}_{center_y}") % 1000000
          
+    def recognize_face_balanced(self, embedding: np.ndarray, 
+                              centroids: Dict[str, np.ndarray]) -> Tuple[Optional[str], float, Dict]:
+        """Enhanced recognition with balanced similarity methods"""
+        
+        if not centroids:
+            return None, 0.0, {}
+        
+        # Use balanced similarity engine
+        similarity_scores = self.similarity_engine.compute_balanced_similarity(
+            embedding, centroids
+        )
+        
+        # Find best match
+        best_identity = None
+        best_score = 0.0
+        detailed_scores = {}
+        
+        for identity, score in similarity_scores.items():
+            detailed_scores[identity] = score
+            if score > best_score and score >= self.config['recognition_threshold']:
+                best_score = score
+                best_identity = identity
+        
+        # Debug output
+        if self.config.get('verbose', False) and best_identity:
+            print(f"✅ Balanced recognition: {best_identity} (score: {best_score:.3f})")
+        
+        return best_identity, best_score, detailed_scores
+
+    def get_balanced_stats(self) -> Dict:
+        """Get balanced engine statistics"""
+        stats = self.similarity_engine.get_engine_stats()
+        
+        # Add recognition statistics
+        if hasattr(self, 'last_results'):
+            total_faces = len(self.last_results)
+            recognized_faces = len([r for r in self.last_results if r['identity']])
+            stats['recognition_rate'] = recognized_faces / total_faces if total_faces > 0 else 0
+        
+        return stats         
 class DisplayResizer:
     """Handles multiple resizing strategies for output display"""
     
@@ -2380,14 +2941,83 @@ class RealTimeProcessor:
         self.reconnect_delay = 5
         self.max_reconnect_attempts = 5
         
-        # Enhanced display resizing - NOW APPLIED TO INPUT STREAM
+        # Enhanced display resizing
+        self.resizer = DisplayResizer()
+        self.show_resize_info = False
+        self.original_frame_size = None
+        
+        # Processing resolution
+        self.processing_width = 1000
+        self.processing_height = 500
+        self.processing_scale = 1.0
+        
+        # 🆕 CONTEXT-AWARE SCALING SYSTEM
+        self.context_aware_scaler = ContextAwareDynamicScaling(self.config)
+        self.enable_context_awareness = True
+        self.context_debug_mode = False
+        
+        # Dynamic Resolution Adjustment System
+        self.dynamic_adjustment_enabled = True
+        self.adaptive_check_interval = 30
+        self.max_history_size = 50
+
+        # Performance tracking
+        self.performance_history = []
+        self.consecutive_poor_detections = 0
+        self.consecutive_good_detections = 0
+        self.adjustment_cooldown = 0
+
+        # Resolution adjustment parameters
+        self.min_processing_scale = 0.3
+        self.max_processing_scale = 2.5
+        self.current_processing_scale = 1.0
+        self.scale_adjustment_step = 0.1
+        
+        # Performance thresholds
+        self.target_detection_rate = 0.7
+        self.target_face_size = 80
+        self.min_face_size = 30
+        
+        # Detection quality tracking
+        self.consecutive_poor_detections = 0
+        self.consecutive_good_detections = 0
+        self.adjustment_cooldown = 0
+        
+        print("🎯 Context-aware dynamic scaling ENABLED")
+        self.face_system = face_system
+        self.cap = None
+        self.fps = 0
+        self.frame_count = 0
+        self.processing_count = 0
+        self.start_time = time.time()
+        self.config = face_system.config
+        
+        # Frame processing optimization
+        self.processing_interval = processing_interval
+        self.last_processed_time = 0
+        self.min_processing_delay = 0.1
+        
+        # Threading for RTSP stability
+        self.frame_queue = Queue(maxsize=buffer_size)
+        self.latest_frame = None
+        self.frame_lock = Lock()
+        self.running = False
+        self.capture_thread = None
+        self.processing_lock = Lock()
+        
+        # RTSP configuration
+        self.rtsp_url = None
+        self.reconnect_delay = 5
+        self.max_reconnect_attempts = 5
+        
+        # Enhanced display resizing 
         self.resizer = DisplayResizer()
         self.show_resize_info = False
         self.original_frame_size = None
         
         # Processing resolution - resize input stream for processing
-        self.processing_width = 1000  # Default processing width
-        self.processing_height = 500  # Default processing height
+        self.processing_width = 1280  # Default processing width
+        self.processing_height = 720  # Default processing height
         self.processing_scale = 1.0   # Scale factor for processing
         
         # Debug controls
@@ -2416,7 +3046,7 @@ class RealTimeProcessor:
         
         # Resolution adjustment parameters
         self.min_processing_scale = 0.5   # Minimum scale (50% of original)
-        self.max_processing_scale = 1.5   # Maximum scale (150% of original)
+        self.max_processing_scale = 3.0   # Maximum scale (150% of original)
         self.current_processing_scale = 1.0
         self.scale_adjustment_step = 0.1
         
@@ -2477,6 +3107,202 @@ class RealTimeProcessor:
         
         print("🖼️  Enhanced image logging system READY") 
         print("🔊 Voice alert system READY")
+            
+    def enhanced_dynamic_adjustment(self, frame: np.ndarray, results: List[Dict], 
+                                original_shape: Tuple[int, int]) -> bool:
+        """Enhanced dynamic adjustment with scene context awareness"""
+        if not self.dynamic_adjustment_enabled or self.adjustment_cooldown > 0:
+            return False
+        
+        # Only adjust periodically to avoid oscillation
+        if self.frame_count % self.adaptive_check_interval != 0:
+            return False
+        
+        # Analyze detection performance
+        performance = self.analyze_detection_performance(results, original_shape)
+        
+        if self.enable_context_awareness and hasattr(self, 'context_aware_scaler'):
+            # Use context-aware scaling
+            optimal_scale = self.context_aware_scaler.compute_optimal_scale(
+                frame, results, performance
+            )
+            
+            # Apply the adjustment
+            adjustment_made = self.context_aware_scaler.apply_scale_adjustment(optimal_scale)
+            
+            if adjustment_made:
+                self.current_processing_scale = self.context_aware_scaler.current_scale
+                return True
+        
+        return False
+    
+    def enhanced_dynamic_adjustment(self, frame: np.ndarray, results: List[Dict], 
+                                  original_shape: Tuple[int, int]) -> bool:
+        """Enhanced dynamic adjustment with scene context awareness"""
+        if not self.dynamic_adjustment_enabled or self.adjustment_cooldown > 0:
+            return False
+        
+        # Only adjust periodically to avoid oscillation
+        if self.frame_count % self.adaptive_check_interval != 0:
+            return False
+        
+        # Analyze detection performance
+        performance = self.analyze_detection_performance(results, original_shape)
+        
+        if self.enable_context_awareness:
+            # Use context-aware scaling
+            optimal_scale = self.context_aware_scaler.compute_optimal_scale(
+                frame, results, performance
+            )
+            
+            # Apply the adjustment
+            adjustment_made = self.context_aware_scaler.apply_scale_adjustment(optimal_scale)
+            
+            if adjustment_made:
+                self.current_processing_scale = self.context_aware_scaler.current_scale
+                return True
+        
+        return False
+
+    def toggle_context_awareness(self):
+        """Toggle context-aware scaling"""
+        self.enable_context_awareness = not self.enable_context_awareness
+        status = "ENABLED" if self.enable_context_awareness else "DISABLED"
+        print(f"🎯 Context-aware scaling: {status}")
+
+    def print_context_statistics(self):
+        """Print detailed context analysis statistics"""
+        if not hasattr(self, 'context_aware_scaler'):
+            print("❌ Context-aware scaling not available")
+            return
+        
+        stats = self.context_aware_scaler.get_scaling_statistics()
+        
+        print("\n" + "="*60)
+        print("📊 CONTEXT-AWARE SCALING STATISTICS")
+        print("="*60)
+        print(f"Current Scale: {stats['current_scale']:.2f}")
+        print(f"Total Decisions: {stats['total_decisions']}")
+        print(f"Context Influence: {stats['context_influence']:.0%}")
+        
+        if 'recent_context_stats' in stats and stats['recent_context_stats']:
+            print(f"\n📈 Recent Context Analysis:")
+            for metric, values in stats['recent_context_stats'].items():
+                print(f"   {metric:20}: {values['mean']:.3f} ± {values['std']:.3f}")
+        
+        if 'common_recommendations' in stats:
+            print(f"\n🎯 Common Recommendations:")
+            for reason, count in stats['common_recommendations'].items():
+                print(f"   {count:2}x {reason}")
+        
+        print("="*60)
+
+    def draw_context_info(self, frame: np.ndarray, context: Dict[str, float]):
+        """Draw context analysis information on frame"""
+        if not self.context_debug_mode:
+            return
+        
+        h, w = frame.shape[:2]
+        
+        # Create overlay
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (10, 10), (300, 180), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+        
+        # Context metrics
+        metrics = [
+            f"Face Density: {context.get('face_density', 0):.3f}",
+            f"Scene Complexity: {context.get('scene_complexity', 0):.3f}",
+            f"Lighting: {context.get('lighting_conditions', 0):.3f}",
+            f"Motion Level: {context.get('motion_level', 0):.3f}",
+            f"Focus Quality: {context.get('focus_quality', 0):.3f}",
+            f"Current Scale: {self.current_processing_scale:.2f}x"
+        ]
+        
+        for i, metric in enumerate(metrics):
+            y_pos = 40 + (i * 25)
+            cv2.putText(frame, metric, (20, y_pos),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)    
+
+    def update_dynamic_system(self):
+        """Update dynamic adjustment system state"""
+        if self.adjustment_cooldown > 0:
+            self.adjustment_cooldown -= 1
+        
+        # Trim performance history
+        if len(self.performance_history) > self.max_history_size:
+            self.performance_history.pop(0)
+
+    def enhanced_resize_for_processing(self, frame: np.ndarray) -> np.ndarray:
+        """Resize frame for processing using dynamic scale with error handling"""
+        try:
+            if self.current_processing_scale == 1.0:
+                return frame
+                
+            h, w = frame.shape[:2]
+            new_w = max(64, int(w * self.current_processing_scale))  # Minimum 64px
+            new_h = max(64, int(h * self.current_processing_scale))  # Minimum 64px
+            
+            return cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        except Exception as e:
+            print(f"❌ Error in enhanced_resize_for_processing: {e}")
+            return frame  # Fallback to original frame
+
+    def scale_bbox_to_original(self, bbox: List[int], original_shape: Tuple[int, int], 
+                            processed_shape: Tuple[int, int]) -> List[int]:
+        """Scale bounding box coordinates from processed frame back to original frame"""
+        x1, y1, x2, y2 = bbox
+        orig_h, orig_w = original_shape
+        proc_h, proc_w = processed_shape
+        
+        scale_x = orig_w / proc_w
+        scale_y = orig_h / proc_h
+        
+        return [
+            int(x1 * scale_x),
+            int(y1 * scale_y),
+            int(x2 * scale_x),
+            int(y2 * scale_y)
+        ]
+
+    def _prepare_display_results(self, results: List[Dict], original_frame: np.ndarray, 
+                            display_frame: np.ndarray) -> List[Dict]:
+        """Scale results to display coordinates"""
+        if not results:
+            return []
+        
+        original_h, original_w = original_frame.shape[:2]
+        display_h, display_w = display_frame.shape[:2]
+        
+        display_results = []
+        for result in results:
+            display_bbox = self.scale_bbox_to_display(
+                result['bbox'],
+                (original_h, original_w),
+                (display_h, display_w)
+            )
+            display_result = result.copy()
+            display_result['bbox'] = display_bbox
+            display_results.append(display_result)
+        
+        return display_results
+
+    def scale_bbox_to_display(self, bbox: List[int], original_shape: Tuple[int, int], 
+                            display_shape: Tuple[int, int]) -> List[int]:
+        """Scale bounding box coordinates from original frame to display frame"""
+        x1, y1, x2, y2 = bbox
+        orig_h, orig_w = original_shape
+        disp_h, disp_w = display_shape
+        
+        scale_x = disp_w / orig_w
+        scale_y = disp_h / orig_h
+        
+        return [
+            int(x1 * scale_x),
+            int(y1 * scale_y), 
+            int(x2 * scale_x),
+            int(y2 * scale_y)
+        ]        
         
     def check_and_send_alerts(self, results: List[Dict]):
         """Check for mask violations and send voice alerts"""
@@ -3731,20 +4557,31 @@ class RealTimeProcessor:
             status = "ENABLED" if self.face_system.robust_config['enable_quality_adaptive_similarity'] else "DISABLED"
             print(f"🎯 Quality-adaptive similarity: {status}")
 
-        elif key == ord('P'):  # Print quality-adaptive statistics
-            stats = self.face_system.get_quality_adaptive_stats()
-            print("\n" + "="*50)
-            print("📊 QUALITY-ADAPTIVE SIMILARITY STATISTICS")
-            print("="*50)
-            for profile, data in stats.items():
-                if profile != 'quality_distribution':
-                    print(f"{profile:15}: {data['count']:3} uses ({data['percentage']}) - {data['description']}")
-            if 'quality_distribution' in stats:
-                qd = stats['quality_distribution']
-                print(f"\nQuality Distribution:")
-                print(f"  Average: {qd['avg_quality']:.3f}, Min: {qd['min_quality']:.3f}, Max: {qd['max_quality']:.3f}")
-                print(f"  Faces Assessed: {qd['faces_assessed']}")
-            print("="*50)            
+        # elif key == ord('P'):  # Print quality-adaptive statistics
+        #     stats = self.face_system.get_quality_adaptive_stats()
+        #     print("\n" + "="*50)
+        #     print("📊 QUALITY-ADAPTIVE SIMILARITY STATISTICS")
+        #     print("="*50)
+        #     for profile, data in stats.items():
+        #         if profile != 'quality_distribution':
+        #             print(f"{profile:15}: {data['count']:3} uses ({data['percentage']}) - {data['description']}")
+        #     if 'quality_distribution' in stats:
+        #         qd = stats['quality_distribution']
+        #         print(f"\nQuality Distribution:")
+        #         print(f"  Average: {qd['avg_quality']:.3f}, Min: {qd['min_quality']:.3f}, Max: {qd['max_quality']:.3f}")
+        #         print(f"  Faces Assessed: {qd['faces_assessed']}")
+        #     print("="*50)
+            
+        elif key == ord('C'):  # Toggle context awareness
+            self.toggle_context_awareness()
+            
+        elif key == ord('X'):  # Print context statistics
+            self.print_context_statistics()
+            
+        elif key == ord('Z'):  # Toggle context debug display
+            self.context_debug_mode = not self.context_debug_mode
+            status = "ON" if self.context_debug_mode else "OFF"
+            print(f"🔍 Context debug display: {status}")                        
             
         elif key == ord('s'):
             # Save current frame
@@ -3768,6 +4605,31 @@ class RealTimeProcessor:
             self.processing_count = 0
             self.start_time = time.time()
             print("🔄 Processing counters reset")
+            
+        elif key == ord('B'):  # Toggle balanced similarity engine
+            if hasattr(self.face_system, 'similarity_engine'):
+                if isinstance(self.face_system.similarity_engine, BalancedSimilarityEngine):
+                    # Switch back to quality adaptive
+                    self.face_system.similarity_engine = QualityAdaptiveSimilarityEngine(self.face_system.config)
+                    print("🔄 Switched to QUALITY-ADAPTIVE similarity engine")
+                else:
+                    # Switch to balanced
+                    self.face_system.similarity_engine = BalancedSimilarityEngine(self.face_system.config)
+                    print("⚖️ Switched to BALANCED similarity engine")
+        
+        elif key == ord('W'):  # Print balanced engine statistics
+            if hasattr(self.face_system, 'get_balanced_stats'):
+                stats = self.face_system.get_balanced_stats()
+                print("\n" + "="*50)
+                print("⚖️ BALANCED SIMILARITY ENGINE STATISTICS")
+                print("="*50)
+                print(f"Engine Type: {stats.get('engine_type', 'N/A')}")
+                print(f"Active Methods: {stats.get('active_methods', [])}")
+                print(f"Total Methods: {stats.get('total_methods', 0)}")
+                print(f"Fixed Weights: {stats.get('fixed_weights', {})}")
+                if 'recognition_rate' in stats:
+                    print(f"Recognition Rate: {stats['recognition_rate']:.1%}")
+                print("="*50)            
             
         elif key == ord('i'):  # Toggle resize info display
             self.toggle_resize_info()
@@ -4723,6 +5585,19 @@ class AdaptiveProcessingEngine:
                 resource_plan['low_priority'].append(face)
         
         return resource_plan    
+
+# class EnhancedRealTimeProcessor(RealTimeProcessor):
+#     def __init__(self, face_system, processing_interval: int = 5, buffer_size: int = 3):
+#         super().__init__(face_system, processing_interval, buffer_size)
+        
+#         # Replace basic dynamic scaling with context-aware version
+#         self.context_aware_scaler = ContextAwareDynamicScaling(self.config)
+        
+#         # Context analysis features
+#         self.enable_context_awareness = True
+#         self.context_debug_mode = False
+        
+
     
 class PriorityAwareRecognitionSystem(RobustFaceRecognitionSystem):
     def __init__(self, config: Dict):
@@ -4819,6 +5694,84 @@ class PriorityAwareRecognitionSystem(RobustFaceRecognitionSystem):
         })
         
         return face_data                    
+ 
+class BalancedSimilarityEngine(EnhancedSimilarityEngine):
+    def __init__(self, config: Dict):
+        super().__init__(config)
+        
+        # Define optimal method subset (5 core methods)
+        self.active_methods = {
+            'cosine': self.cosine_similarity,
+            'angular': self.angular_similarity, 
+            'pearson': self.pearson_correlation,
+            'manhattan': self.manhattan_similarity,
+            'jaccard': self.jaccard_similarity
+        }
+        
+        # Optimal weights based on empirical research
+        self.fixed_weights = {
+            'cosine': 0.30,    # Primary: Best for normalized embeddings
+            'angular': 0.25,   # Secondary: Robust to variations
+            'pearson': 0.20,   # Tertiary: Feature correlation
+            'manhattan': 0.15, # Robust: Outlier-resistant
+            'jaccard': 0.10    # Diverse: Set-based approach
+        }
+        
+        print("⚖️ Balanced Similarity Engine initialized")
+        print(f"   Active methods: {list(self.active_methods.keys())}")
+        print(f"   Weights: {self.fixed_weights}")
+
+    def compute_balanced_similarity(self, embedding: np.ndarray, 
+                                  centroids: Dict[str, np.ndarray]) -> Dict[str, float]:
+        """Compute similarity using balanced method combination"""
+        similarity_scores = {}
+        
+        for identity, centroid in centroids.items():
+            total_score = 0.0
+            total_weight = 0.0
+            method_results = {}  # For debugging
+            
+            for method_name, method_func in self.active_methods.items():
+                try:
+                    raw_score = method_func(embedding, centroid)
+                    normalized_score = self._normalize_score(method_name, raw_score)
+                    weight = self.fixed_weights[method_name]
+                    
+                    total_score += weight * normalized_score
+                    total_weight += weight
+                    method_results[method_name] = {
+                        'raw': raw_score,
+                        'normalized': normalized_score,
+                        'weight': weight
+                    }
+                    
+                except Exception as e:
+                    if self.config.get('verbose', False):
+                        print(f"⚠️ Balanced method {method_name} failed: {e}")
+                    continue
+            
+            if total_weight > 0:
+                final_score = total_score / total_weight
+                similarity_scores[identity] = final_score
+                
+                # Debug output
+                if self.config.get('verbose', False) and final_score > 0.5:
+                    print(f"🎯 {identity}: {final_score:.3f}")
+                    for method, results in method_results.items():
+                        print(f"     {method}: {results['normalized']:.3f} (weight: {results['weight']})")
+            else:
+                similarity_scores[identity] = 0.0
+        
+        return similarity_scores
+
+    def get_engine_stats(self) -> Dict:
+        """Get engine statistics"""
+        return {
+            'engine_type': 'balanced',
+            'active_methods': list(self.active_methods.keys()),
+            'fixed_weights': self.fixed_weights,
+            'total_methods': len(self.active_methods)
+        } 
     
 class FairnessController:
     def __init__(self):
@@ -4863,7 +5816,7 @@ CONFIG = {
     'mask_detection_threshold': 0.6,  
     'roi_padding': 15,  
     'embedding_model': 'Facenet',
-    'recognition_threshold': 0.4,  
+    'recognition_threshold': 0.6,  
     'max_faces_per_frame': 10,
     'min_face_size': 40,  
     'enable_face_tracking': True,
@@ -4873,6 +5826,31 @@ CONFIG = {
     'alert_server_url': 'https://your-domain.my.id/actions/a_notifikasi_suara_speaker.php',
     'alert_cooldown_seconds': 30,  # Prevent spam
     'enable_voice_alerts': True,
+}
+
+# BALANCED CONFIG (No Quality Profiles)
+BALANCED_CONFIG = {
+    **CONFIG,  # Start with base config
+    
+    # Balanced similarity settings
+    'enable_balanced_similarity': True,
+    'enable_quality_adaptive_similarity': False,  # Disable quality profiles
+    
+    # Similarity parameters
+    'recognition_threshold': 0.5,
+    'similarity_weights': {
+        'cosine': 0.30,
+        'angular': 0.35, 
+        'pearson': 0.20,
+        'manhattan': 0.10,
+        'jaccard': 0.05
+    },
+    
+    # Robust processing (keep these)
+    'enable_multi_scale': True,
+    'enable_temporal_fusion': True,
+    'enable_quality_aware': True,  # Still assess quality, just don't use for method selection
+    'min_face_quality': 0.3,
 }
 
 # ENHANCED CONFIG WITH SIMILARITY SETTINGS
@@ -4905,12 +5883,12 @@ ROBUST_CONFIG = {
     'similarity_method': 'quality_adaptive',
     'similarity_weights': {
         'cosine': 0.25,
-        'angular': 0.20,
+        'angular': 0.40,
         'pearson': 0.15,
         'dot_product': 0.15,
         'euclidean': 0.10,
-        'manhattan': 0.10,
-        'jaccard': 0.05
+        'manhattan': 0.15,
+        'jaccard': 0.20
     },
     
     # Quality-adaptive settings
@@ -5041,40 +6019,22 @@ HIGH_PRIORITY_CONFIG = {
     'min_face_size': 80,    # Require larger faces for critical recognition
 }
 
-# CONFIG FOR MULTIPLE SPECIFIC PERSONS
-MULTI_PERSON_CONFIG = {
-    **OPTIMIZED_FACE_CONFIG,
+# Use this config for context-aware processing
+CONTEXT_AWARE_CONFIG = {
+    **CONFIG,
     
-    # Balanced settings for multiple specific persons
-    'person_specific_thresholds': {
-        'person_A': 0.6,   # Higher threshold for person A
-        'person_B': 0.55,  # Slightly lower for person B
-        'person_C': 0.7,   # Very high threshold for person C
-    },
+    # Context-aware scaling parameters
+    'min_processing_scale': 0.3,
+    'max_processing_scale': 2.5,
+    'scale_adjustment_step': 0.1,
+    'context_weight': 0.4,
+    'performance_weight': 0.6,
     
-    # Adaptive weights per person group
-    'person_groups': {
-        'high_priority': ['person_A', 'person_C'],
-        'normal_priority': ['person_B', 'person_D']
-    }
+    # Enable context features
+    'enable_context_aware_scaling': True,
 }
 
-def create_optimized_face_system(config: Dict):
-    """Create face recognition system with optimized face-specific similarity"""
-    face_system = RobustFaceRecognitionSystem(config)
-    
-    # Replace with optimized engine
-    face_system.similarity_engine = OptimizedFaceSpecificSimilarityEngine(config)
-    
-    # Enhanced configuration for specific person recognition
-    face_system.robust_config.update({
-        'enable_person_specific_optimization': True,
-        'person_embedding_analysis': True,
-        'adaptive_threshold_per_person': True,
-    })
-    
-    print("🎯 Created system with OPTIMIZED Face-Specific Similarity Engine")
-    return face_system
+
 
 # Enhanced recognition method
 def recognize_specific_person_optimized(self, embedding: np.ndarray, 
@@ -5098,30 +6058,6 @@ def recognize_specific_person_optimized(self, embedding: np.ndarray,
     
     return score, stats
 
-# Integration with existing system
-def create_enhanced_face_system(config: Dict):
-    """Create face recognition system with learning-based similarity"""
-    face_system = RobustFaceRecognitionSystem(config)
-    
-    # Replace similarity engine based on configuration
-    engine_type = config.get('similarity_engine_type', 'adaptive') # Change this line to change the engine type
-    
-    if engine_type == 'learning':
-        face_system.similarity_engine = LearningSimilarityEngine(config)
-    elif engine_type == 'adaptive':
-        face_system.similarity_engine = AdaptiveWeightSimilarityEngine(config)
-    elif engine_type == 'ml':
-        face_system.similarity_engine = MLEnhancedSimilarityEngine(config)
-    elif engine_type == 'dynamic':
-        face_system.similarity_engine = DynamicSimilarityEngine(config)
-    elif engine_type == 'face_specific':
-        face_system.similarity_engine = FaceSpecificSimilarityEngine(config)
-    else:
-        face_system.similarity_engine = LearningSimilarityEngine(config)  # Default
-    
-    print(f"🎯 Created system with {engine_type} similarity engine")
-    return face_system
-
 def validate_config(config: Dict) -> bool:
     """Validate configuration parameters"""
     required_keys = ['detection_model_path', 'embeddings_db_path', 'detection_confidence']
@@ -5141,245 +6077,71 @@ def validate_config(config: Dict) -> bool:
     
     return True
 
-choice = input("Please choose the process (1, 2, or 3)that want to be running: ")
-if choice == '1':
-    def main_enhanced():
-        # Initialize system with learning capabilities
-        face_system = create_enhanced_face_system(LEARNING_CONFIG)
-        
-        # Create processor
-        processor = RealTimeProcessor(
-            face_system=face_system,
-            processing_interval=5,
-            buffer_size=5
-        )
-        
-        # Add method to update learning from recognition results
-        def enhanced_process_frame(self, frame: np.ndarray) -> List[Dict]:
-            """Enhanced processing with learning updates"""
-            results = self.face_system.process_frame_robust(frame)
-            
-            # Update learning for each result (in real system, ground truth would come from user feedback)
-            for result in results:
-                # In production, ground_truth would come from user corrections or high-confidence temporal fusion
-                ground_truth = None  # This would be set based on actual validation
-                
-                # Update learning components
-                if hasattr(self.face_system.similarity_engine, 'update_learning'):
-                    self.face_system.similarity_engine.update_learning(result, ground_truth)
-            
-            return results
-        
-        # Replace the process_frame method
-        processor.face_system.process_frame_robust = enhanced_process_frame.__get__(processor.face_system, type(processor.face_system))
-        
-                    # Choose your input source
-        sources = {
-            '1': '0',                          # Default camera
-            '2': 'rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/101',  # RTSP
-            '3': 'http://192.168.1.101:8080/video',                   # IP camera
-            '4': 'video.mp4'                   # Video file
-        }
-        
-        print("Available sources:")
-        for key, source in sources.items():
-            print(f"  {key}: {source}")
-        
-        choice = input("Select source (1-4) or enter custom RTSP URL: ").strip()
-        
-        if choice in sources:
-            source = sources[choice]
-        else:
-            source = choice  # Custom input
-            
-        # Configure display
-        processor.set_display_size(1280, 720, "fixed_size")            
-        
-        # Run system
-        try:
-            processor.run(source)  # Use default camera
-        except KeyboardInterrupt:
-            print("\n🛑 Interrupted by user")
-        except Exception as e:
-            print(f"❌ Error: {e}")
-        finally:
-            processor.stop()    
-            
-            # Save learning state
-            if hasattr(processor.face_system.similarity_engine, 'save_model'):
-                processor.face_system.similarity_engine.save_model('similarity_model.pkl')
 
-    if __name__ == "__main__":
-        main_enhanced()
-elif choice == '2':
-    def main():
-        # Initialize system
-        face_system = RobustFaceRecognitionSystem(ROBUST_CONFIG)
-        
-        # Create processor with optimization
-        processor = RealTimeProcessor(
-            face_system=face_system,
-            processing_interval=5,
-            buffer_size=5
-        )
-        
-            # Choose your input source
-        sources = {
-            '1': '0',                          # Default camera
-            '2': 'rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/101',  # RTSP
-            '3': 'http://192.168.1.101:8080/video',                   # IP camera
-            '4': 'video.mp4'                   # Video file
-        }
-        
-        print("Available sources:")
-        for key, source in sources.items():
-            print(f"  {key}: {source}")
-        
-        choice = input("Select source (1-4) or enter custom RTSP URL: ").strip()
-        
-        if choice in sources:
-            source = sources[choice]
-        else:
-            source = choice  # Custom input
-        
-        # Configure display
-        processor.set_display_size(1280, 720, "fixed_size")
-        
-        try:
-            processor.run(source)  # Use default camera
-        except KeyboardInterrupt:
-            print("\n🛑 Interrupted by user")
-        except Exception as e:
-            print(f"❌ Error: {e}")
-        finally:
-            processor.stop()    
-
-    if __name__ == "__main__":
-        main()
+def main_priority_optimized():
+    """Main function with priority-aware optimization"""
+    # Create priority-aware system
+    face_system = RobustFaceRecognitionSystem(CONTEXT_AWARE_CONFIG)
+    processor = RealTimeProcessor(face_system=face_system) # , processing_interval=10
     
-# Example usage in main system
+    # Add fairness controller
+    fairness_controller = FairnessController()
+    
+    print("🚀 Starting with BALANCED similarity engine")
+    print("   - Methods: cosine, angular, pearson, manhattan, jaccard")
+    print("   - Weights: [0.30, 0.25, 0.20, 0.15, 0.10]")
+    print("   - No quality profiles used")    
+    
+    def priority_aware_callback(results: List[Dict]):
+        """Monitor system performance and fairness"""
+        # Apply fairness controls
+        fair_results = fairness_controller.ensure_fair_attention(results)
+        
+        # Log priority distribution
+        priority_levels = {'high': 0, 'medium': 0, 'low': 0}
+        for result in fair_results:
+            level = result.get('processing_level', 'basic')
+            priority_levels[level] += 1
+        
+        print(f"🎯 Priority Distribution: High={priority_levels['high']}, "
+            f"Medium={priority_levels['medium']}, Low={priority_levels['low']}")
+        
+        # Monitor recognition fairness
+        unique_identities = len(set(r['identity'] for r in fair_results if r['identity']))
+        print(f"👥 Unique identities detected: {unique_identities}")
+    
+    processor.results_callback = priority_aware_callback
+    
+    # Choose input source
+    source = select_source()
+    
+    # Configure display
+    processor.set_display_size(1280, 720, "fixed_size")
+    
+    try:
+        processor.run(source)
+    except KeyboardInterrupt:
+        print("\n🛑 Interrupted by user")
+    except Exception as e:
+        print(f"❌ Error: {e}")
+    finally:
+        processor.stop()
 
-elif choice == '3':
-    def main_priority_optimized():
-        """Main function with priority-aware optimization"""
-        # Create priority-aware system
-        face_system = PriorityAwareRecognitionSystem(PRIORITY_AWARE_CONFIG)
-        processor = RealTimeProcessor(face_system=face_system, processing_interval=3)
-        
-        # Add fairness controller
-        fairness_controller = FairnessController()
-            
-        def select_source():
-            """Interactive source selection"""
-            sources = {
-                '1': '0',  # Default camera
-                '2': 'rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/101',
-                '3': 'http://192.168.1.101:8080/video',
-                '4': 'video.mp4'
-            }
-            
-            print("Available sources:")
-            for key, source in sources.items():
-                print(f"  {key}: {source}")
-            
-            choice = input("Select source (1-4) or enter custom RTSP URL: ").strip()
-            return sources.get(choice, choice)        
-        
-        def priority_aware_callback(results: List[Dict]):
-            """Monitor system performance and fairness"""
-            # Apply fairness controls
-            fair_results = fairness_controller.ensure_fair_attention(results)
-            
-            # Log priority distribution
-            priority_levels = {'high': 0, 'medium': 0, 'low': 0}
-            for result in fair_results:
-                level = result.get('processing_level', 'basic')
-                priority_levels[level] += 1
-            
-            print(f"🎯 Priority Distribution: High={priority_levels['high']}, "
-                f"Medium={priority_levels['medium']}, Low={priority_levels['low']}")
-            
-            # Monitor recognition fairness
-            unique_identities = len(set(r['identity'] for r in fair_results if r['identity']))
-            print(f"👥 Unique identities detected: {unique_identities}")
-        
-        processor.results_callback = priority_aware_callback
-        
-        # Choose input source
-        source = select_source()
-        
-        # Configure display
-        processor.set_display_size(1280, 720, "fixed_size")
-        
-        try:
-            processor.run(source)
-        except KeyboardInterrupt:
-            print("\n🛑 Interrupted by user")
-        except Exception as e:
-            print(f"❌ Error: {e}")
-        finally:
-            processor.stop()
-    if __name__ == "__main__":
-        main_priority_optimized()    
+def select_source():
+    """Interactive source selection"""
+    sources = {
+        '1': '0',  # Default camera
+        '2': 'rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/101',
+        '3': 'http://192.168.1.101:8080/video',
+        '4': 'video.mp4'
+    }
+    
+    print("Available sources:")
+    for key, source in sources.items():
+        print(f"  {key}: {source}")
+    
+    choice = input("Select source (1-4) or enter custom RTSP URL: ").strip()
+    return sources.get(choice, choice)
 
-
-
-else:
-    def main_optimized():
-        """Main function with optimized face-specific recognition"""
-        face_system = create_optimized_face_system(OPTIMIZED_FACE_CONFIG)
-        processor = RealTimeProcessor(face_system=face_system, processing_interval=3)
-        
-        # Monitor specific persons
-        target_persons = ['Arum', 'Citra', 'Dyah', 'Farid', 'Faruq', 'Hesti', 'Nita', 'Valen', 'Widya'] # Replace with your specific persons
-        
-        def enhanced_callback(results: List[Dict]):
-            """Enhanced callback to monitor specific persons"""
-            for result in results:
-                identity = result.get('identity')
-                if identity in target_persons:
-                    confidence = result.get('recognition_confidence', 0)
-                    print(f"🎯 Target person {identity} detected with confidence: {confidence:.3f}")
-                    
-                    # Get detailed similarity stats
-                    if hasattr(face_system.similarity_engine, 'get_person_similarity_stats'):
-                        stats = face_system.similarity_engine.get_person_similarity_stats(identity)
-                        print(f"   Similarity stats: {stats}")
-        
-        # Add callback to processor (you might need to modify RealTimeProcessor to support this)
-        processor.results_callback = enhanced_callback
-        
-            # Choose your input source
-        sources = {
-            '1': '0',                          # Default camera
-            '2': 'rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/101',  # RTSP
-            '3': 'http://192.168.1.101:8080/video',                   # IP camera
-            '4': 'video.mp4'                   # Video file
-        }
-        
-        print("Available sources:")
-        for key, source in sources.items():
-            print(f"  {key}: {source}")
-        
-        choice = input("Select source (1-4) or enter custom RTSP URL: ").strip()
-        
-        if choice in sources:
-            source = sources[choice]
-        else:
-            source = choice  # Custom input
-        
-        # Configure display
-        processor.set_display_size(1280, 720, "fixed_size")
-        
-        try:
-            processor.run(source)  # Use default camera
-        except KeyboardInterrupt:
-            print("\n🛑 Interrupted by user")
-        except Exception as e:
-            print(f"❌ Error: {e}")
-        finally:
-            processor.stop() 
-
-    if __name__ == "__main__":
-        main_optimized()
-        
+if __name__ == "__main__":
+    main_priority_optimized()
