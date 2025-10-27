@@ -2438,7 +2438,7 @@ class FaceRecognitionSystem:
         for detection in detections:
             x1, y1, x2, y2 = detection['bbox']
             
-            padding = self.config.get('roi_padding', 15)  # Increased padding for better mask detection
+            padding = self.config.get('roi_padding', 20)  # Increased padding for better mask detection
             h, w = frame.shape[:2]
             x1_pad = max(0, x1 - padding)
             y1_pad = max(0, y1 - padding)
@@ -4556,21 +4556,6 @@ class RealTimeProcessor:
                 not self.face_system.robust_config['enable_quality_adaptive_similarity']
             status = "ENABLED" if self.face_system.robust_config['enable_quality_adaptive_similarity'] else "DISABLED"
             print(f"🎯 Quality-adaptive similarity: {status}")
-
-        # elif key == ord('P'):  # Print quality-adaptive statistics
-        #     stats = self.face_system.get_quality_adaptive_stats()
-        #     print("\n" + "="*50)
-        #     print("📊 QUALITY-ADAPTIVE SIMILARITY STATISTICS")
-        #     print("="*50)
-        #     for profile, data in stats.items():
-        #         if profile != 'quality_distribution':
-        #             print(f"{profile:15}: {data['count']:3} uses ({data['percentage']}) - {data['description']}")
-        #     if 'quality_distribution' in stats:
-        #         qd = stats['quality_distribution']
-        #         print(f"\nQuality Distribution:")
-        #         print(f"  Average: {qd['avg_quality']:.3f}, Min: {qd['min_quality']:.3f}, Max: {qd['max_quality']:.3f}")
-        #         print(f"  Faces Assessed: {qd['faces_assessed']}")
-        #     print("="*50)
             
         elif key == ord('C'):  # Toggle context awareness
             self.toggle_context_awareness()
@@ -5584,19 +5569,7 @@ class AdaptiveProcessingEngine:
                 face['processing_level'] = 'basic'
                 resource_plan['low_priority'].append(face)
         
-        return resource_plan    
-
-# class EnhancedRealTimeProcessor(RealTimeProcessor):
-#     def __init__(self, face_system, processing_interval: int = 5, buffer_size: int = 3):
-#         super().__init__(face_system, processing_interval, buffer_size)
-        
-#         # Replace basic dynamic scaling with context-aware version
-#         self.context_aware_scaler = ContextAwareDynamicScaling(self.config)
-        
-#         # Context analysis features
-#         self.enable_context_awareness = True
-#         self.context_debug_mode = False
-        
+        return resource_plan        
 
     
 class PriorityAwareRecognitionSystem(RobustFaceRecognitionSystem):
@@ -5811,10 +5784,10 @@ CONFIG = {
     'detection_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\yolov11n-face.pt',
     'mask_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\run_py\mask_detector112.onnx',  
     'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\person_folder_2.json',
-    'detection_confidence': 0.5,
-    'detection_iou': 0.5,
-    'mask_detection_threshold': 0.6,  
-    'roi_padding': 15,  
+    'detection_confidence': 0.6,
+    'detection_iou': 0.6,
+    'mask_detection_threshold': 0.8,  
+    'roi_padding': 25,  
     'embedding_model': 'Facenet',
     'recognition_threshold': 0.6,  
     'max_faces_per_frame': 10,
@@ -5824,33 +5797,8 @@ CONFIG = {
     
     # 🆕 VOICE ALERT CONFIGURATION
     'alert_server_url': 'https://your-domain.my.id/actions/a_notifikasi_suara_speaker.php',
-    'alert_cooldown_seconds': 30,  # Prevent spam
+    'alert_cooldown_seconds': 120,  # Prevent spam
     'enable_voice_alerts': True,
-}
-
-# BALANCED CONFIG (No Quality Profiles)
-BALANCED_CONFIG = {
-    **CONFIG,  # Start with base config
-    
-    # Balanced similarity settings
-    'enable_balanced_similarity': True,
-    'enable_quality_adaptive_similarity': False,  # Disable quality profiles
-    
-    # Similarity parameters
-    'recognition_threshold': 0.5,
-    'similarity_weights': {
-        'cosine': 0.30,
-        'angular': 0.35, 
-        'pearson': 0.20,
-        'manhattan': 0.10,
-        'jaccard': 0.05
-    },
-    
-    # Robust processing (keep these)
-    'enable_multi_scale': True,
-    'enable_temporal_fusion': True,
-    'enable_quality_aware': True,  # Still assess quality, just don't use for method selection
-    'min_face_quality': 0.3,
 }
 
 # ENHANCED CONFIG WITH SIMILARITY SETTINGS
@@ -5899,124 +5847,6 @@ ROBUST_CONFIG = {
         'low_quality': {'min_quality': 0.2},
         'very_low_quality': {'min_quality': 0.0}
     }
-}
-
-# Update the configuration to use learning engines
-LEARNING_CONFIG = {
-    **ROBUST_CONFIG,
-    
-    # Learning engine configuration
-    'similarity_engine_type': 'face_specific',  # 'learning', 'adaptive', 'ml', 'dynamic', 'face_specific'
-    'fusion_mode': 'face_specific',  # 'ml', 'adaptive', 'dynamic', 'face_specific'
-    
-    # Adaptive weight learning
-    'weight_learning_rate': 0.01,
-    'min_learning_samples': 50,
-    
-    # ML fusion configuration  
-    'fusion_model_type': 'random_forest',
-    'min_training_samples': 100,
-    'retrain_interval': 1000,
-    
-    # Dynamic selection
-    'selection_mode': 'adaptive',
-    'top_k_methods': 4,
-    'selection_confidence_threshold': 0.7,
-    'min_method_samples': 20,
-    
-    # Face-specific
-    'face_recognition_threshold': 0.6,
-    'high_confidence_threshold': 0.8,
-}
-
-# OPTIMIZED CONFIG FOR SPECIFIC PERSON RECOGNITION
-OPTIMIZED_FACE_CONFIG = {
-    **LEARNING_CONFIG,
-    
-    # Focus on FaceSpecificSimilarityEngine
-    'similarity_engine_type': 'face_specific',
-    'fusion_mode': 'face_specific',
-    
-    # Enhanced face-specific weights based on research
-    'face_specific_weights': {
-        'cosine': 0.35,      # Best for normalized face embeddings
-        'angular': 0.30,      # Robust to lighting and pose variations  
-        'pearson': 0.20,      # Good for feature correlation in faces
-        'dot_product': 0.10,  # Works well with normalized embeddings
-        'euclidean': 0.05,    # Secondary distance measure
-    },
-    
-    # Person-specific tuning
-    'recognition_threshold': 0.55,      # Higher threshold for specific persons
-    'high_confidence_threshold': 0.75,  # Require strong matches
-    
-    # Embedding quality focus
-    'min_face_quality': 0.4,           # Require better quality for specific persons
-    'enable_multi_scale': True,         # Extract more robust embeddings
-}
-
-PRIORITY_AWARE_CONFIG = {
-    **OPTIMIZED_FACE_CONFIG,
-    
-    # Priority system settings
-    'priority_enabled': True,
-    'priority_factors': {
-        'recognition_confidence': 0.3,
-        'face_quality': 0.25, 
-        'temporal_consistency': 0.2,
-        'recognition_frequency': 0.15,
-        'mask_compliance': 0.1
-    },
-    
-    # Processing levels
-    'processing_levels': {
-        'enhanced': {
-            'multi_scale': True,
-            'quality_adaptive': True,
-            'temporal_fusion': True
-        },
-        'standard': {
-            'multi_scale': False,
-            'quality_adaptive': True,
-            'temporal_fusion': True
-        },
-        'basic': {
-            'multi_scale': False,
-            'quality_adaptive': False,
-            'temporal_fusion': False
-        }
-    },
-    
-    # Fairness controls
-    'max_recognitions_per_person': 10,
-    'priority_decay_rate': 0.1,
-    
-    # Adaptive thresholds
-    'adaptive_priority_thresholds': {
-        'high': 0.7,
-        'medium': 0.5,
-        'low': 0.3
-    }
-}
-
-# CONFIG FOR HIGH-PRIORITY PERSON RECOGNITION
-HIGH_PRIORITY_CONFIG = {
-    **OPTIMIZED_FACE_CONFIG,
-    
-    # Even stricter settings for critical persons
-    'recognition_threshold': 0.65,
-    'high_confidence_threshold': 0.85,
-    
-    # Method prioritization
-    'face_specific_weights': {
-        'angular': 0.40,    # Maximum robustness
-        'cosine': 0.35,     # High precision
-        'pearson': 0.25,    # Feature correlation
-    },
-    
-    # Quality requirements
-    'min_face_quality': 0.5,
-    'min_face_size': 80,    # Require larger faces for critical recognition
 }
 
 # Use this config for context-aware processing
