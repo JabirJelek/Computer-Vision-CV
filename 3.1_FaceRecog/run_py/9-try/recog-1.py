@@ -842,6 +842,8 @@ class DynamicSimilarityEngine(AdaptiveWeightSimilarityEngine):
             stats['method_reliability'][method_name] = self.calculate_method_reliability(method_name)
             
         return stats
+    
+    
 
 class FaceSpecificSimilarityEngine(EnhancedSimilarityEngine):
     """Domain-specific optimizations for face recognition"""
@@ -980,6 +982,208 @@ class FaceSpecificSimilarityEngine(EnhancedSimilarityEngine):
         
         return similarity, confidence
 
+class OptimizedFaceSpecificSimilarityEngine(FaceSpecificSimilarityEngine):
+    def __init__(self, config: Dict):
+        super().__init__(config)
+        
+        # Person-specific similarity profiles
+        self.person_specific_profiles = {}
+        
+        # Embedding quality thresholds
+        self.min_embedding_norm = 0.8
+        self.max_embedding_norm = 1.2
+        
+        # Method performance tracking per person
+        self.person_method_performance = defaultdict(lambda: defaultdict(list))
+        
+        print("🎯 Optimized Face-Specific Similarity Engine initialized")
+
+    def analyze_person_embedding_characteristics(self, identity: str, embeddings: List[np.ndarray]):
+        """Analyze embedding characteristics for specific persons"""
+        if not embeddings:
+            return
+            
+        embedding_matrix = np.vstack([emb.flatten() for emb in embeddings])
+        
+        characteristics = {
+            'norm_mean': np.mean([np.linalg.norm(emb) for emb in embeddings]),
+            'norm_std': np.std([np.linalg.norm(emb) for emb in embeddings]),
+            'feature_variance': np.var(embedding_matrix, axis=0),
+            'sparsity': np.mean(embedding_matrix == 0),
+            'dimensionality': embedding_matrix.shape[1],
+            'outlier_ratio': self._calculate_outlier_ratio(embeddings)
+        }
+        
+        # Store person-specific characteristics
+        self.person_specific_profiles[identity] = characteristics
+        return characteristics
+
+    def get_person_optimized_methods(self, identity: str, quality_scores: Dict[str, float] = None) -> List[str]:
+        """Get methods optimized for specific person based on their embedding characteristics"""
+        base_methods = ['cosine', 'angular', 'pearson', 'dot_product']
+        
+        if identity in self.person_specific_profiles:
+            profile = self.person_specific_profiles[identity]
+            
+            # Adjust methods based on person's embedding characteristics
+            norm_std = profile['norm_std']
+            sparsity = profile['sparsity']
+            
+            if norm_std > 0.2:
+                # High variance in embedding norms - use angular similarity
+                base_methods = ['angular', 'cosine', 'pearson']
+            elif sparsity > 0.3:
+                # Sparse embeddings - use methods robust to sparsity
+                base_methods = ['cosine', 'angular', 'jaccard']
+            else:
+                # Dense embeddings - use correlation-based methods
+                base_methods = ['pearson', 'cosine', 'dot_product']
+        
+        # Apply quality-based adjustments
+        if quality_scores:
+            sharpness = quality_scores.get('sharpness', 0.5)
+            if sharpness < 0.4:
+                base_methods.append('angular')  # More robust to blur
+            
+        return list(dict.fromkeys(base_methods))  # Remove duplicates
+
+    def compute_person_specific_similarity(self, embedding: np.ndarray, 
+                                         centroids: Dict[str, np.ndarray],
+                                         quality_scores: Dict[str, float] = None) -> Dict[str, float]:
+        """Enhanced similarity computation with person-specific optimization"""
+        similarity_scores = {}
+        
+        # Pre-process embedding
+        processed_embedding = self._preprocess_embedding(embedding)
+        
+        for identity, centroid in centroids.items():
+            # Get person-optimized methods
+            optimized_methods = self.get_person_optimized_methods(identity, quality_scores)
+            
+            # Person-specific weights
+            weights = self.get_person_specific_weights(identity, optimized_methods)
+            
+            total_score = 0.0
+            total_weight = 0.0
+            method_scores = {}
+            
+            for method_name in optimized_methods:
+                if method_name not in self.similarity_methods:
+                    continue
+                    
+                try:
+                    method_func = self.similarity_methods[method_name]
+                    raw_score = method_func(processed_embedding, centroid)
+                    normalized_score = self._normalize_score(method_name, raw_score)
+                    
+                    weight = weights.get(method_name, 0.1)
+                    total_score += weight * normalized_score
+                    total_weight += weight
+                    
+                    method_scores[method_name] = normalized_score
+                    
+                except Exception as e:
+                    if self.config.get('verbose', False):
+                        print(f"⚠️ Person-specific method {method_name} failed for {identity}: {e}")
+                    continue
+            
+            # Store method performance for future optimization
+            self._update_method_performance(identity, method_scores)
+            
+            if total_weight > 0:
+                similarity_scores[identity] = total_score / total_weight
+            else:
+                similarity_scores[identity] = 0.0
+        
+        return similarity_scores
+
+    def get_person_specific_weights(self, identity: str, methods: List[str]) -> Dict[str, float]:
+        """Get optimized weights for specific person"""
+        if identity not in self.person_method_performance or not self.person_method_performance[identity]:
+            # Return default weights for new persons
+            return {method: self.face_specific_weights.get(method, 0.1) for method in methods}
+        
+        # Calculate weights based on historical performance
+        performance_weights = {}
+        total_performance = 0.0
+        
+        for method in methods:
+            if method in self.person_method_performance[identity]:
+                scores = self.person_method_performance[identity][method]
+                if scores:
+                    # Use average performance as weight
+                    avg_performance = np.mean(scores)
+                    performance_weights[method] = avg_performance
+                    total_performance += avg_performance
+        
+        # Normalize weights
+        if total_performance > 0:
+            normalized_weights = {method: perf/total_performance 
+                                for method, perf in performance_weights.items()}
+        else:
+            normalized_weights = {method: 1.0/len(methods) for method in methods}
+        
+        return normalized_weights
+
+    def _update_method_performance(self, identity: str, method_scores: Dict[str, float]):
+        """Update method performance tracking for specific person"""
+        for method, score in method_scores.items():
+            self.person_method_performance[identity][method].append(score)
+            # Keep only recent history (last 50 scores)
+            if len(self.person_method_performance[identity][method]) > 50:
+                self.person_method_performance[identity][method].pop(0)
+
+    def _preprocess_embedding(self, embedding: np.ndarray) -> np.ndarray:
+        """Pre-process embedding for better similarity computation"""
+        embedding = embedding.flatten().astype(np.float64)
+        
+        # Normalize embedding
+        norm = np.linalg.norm(embedding)
+        if norm > 0:
+            embedding = embedding / norm
+            
+        # Clip extreme values
+        embedding = np.clip(embedding, -3.0, 3.0)
+        
+        return embedding
+
+    def _calculate_outlier_ratio(self, embeddings: List[np.ndarray]) -> float:
+        """Calculate ratio of outlier embeddings for a person"""
+        if len(embeddings) < 3:
+            return 0.0
+            
+        norms = [np.linalg.norm(emb) for emb in embeddings]
+        median_norm = np.median(norms)
+        mad = np.median(np.abs(norms - median_norm))
+        
+        if mad == 0:
+            return 0.0
+            
+        # Count outliers (more than 2 MAD from median)
+        outlier_count = sum(1 for norm in norms if abs(norm - median_norm) > 2 * mad)
+        return outlier_count / len(embeddings)
+
+    def get_person_similarity_stats(self, identity: str) -> Dict:
+        """Get similarity statistics for specific person"""
+        if identity not in self.person_method_performance:
+            return {}
+            
+        stats = {
+            'method_performance': {},
+            'profile': self.person_specific_profiles.get(identity, {}),
+            'total_comparisons': sum(len(scores) for scores in self.person_method_performance[identity].values())
+        }
+        
+        for method, scores in self.person_method_performance[identity].items():
+            if scores:
+                stats['method_performance'][method] = {
+                    'avg_score': np.mean(scores),
+                    'std_score': np.std(scores),
+                    'count': len(scores),
+                    'reliability': 1.0 - np.std(scores)  # Higher when scores are consistent
+                }
+        
+        return stats
 # Integrated Learning Similarity Engine that combines all approaches
 class LearningSimilarityEngine(DynamicSimilarityEngine, MLEnhancedSimilarityEngine, FaceSpecificSimilarityEngine):
     """Combined learning-based similarity engine with all enhancements"""
@@ -4432,7 +4636,222 @@ class QualityAdaptiveSimilarityEngine(EnhancedSimilarityEngine):
             'wasserstein': "Distribution-based, handles feature distribution shifts"
         }
         return reasoning.get(method, "General purpose similarity measure")
-                                    
+
+class PriorityAwareRecognition:
+    def __init__(self):
+        self.priority_factors = {
+            'recognition_confidence': 0.3,
+            'face_quality': 0.25,
+            'temporal_consistency': 0.2,
+            'recognition_frequency': 0.15,
+            'mask_compliance': 0.1
+        }
+    
+    def calculate_priority_score(self, recognition_result: Dict) -> float:
+        """Calculate dynamic priority based on multiple factors"""
+        score = 0.0
+        
+        # Recognition confidence (higher = more priority)
+        score += self.priority_factors['recognition_confidence'] * recognition_result['recognition_confidence']
+        
+        # Face quality (better quality = more priority)
+        quality_scores = recognition_result.get('quality_scores', {})
+        face_quality = quality_scores.get('overall', 0.5)
+        score += self.priority_factors['face_quality'] * face_quality
+        
+        # Temporal consistency (stable recognition = more priority)
+        track_id = recognition_result.get('track_id')
+        temporal_score = self._calculate_temporal_consistency(track_id)
+        score += self.priority_factors['temporal_consistency'] * temporal_score
+        
+        # Recognition frequency (rare recognitions = more priority)
+        freq_score = self._calculate_recognition_frequency(recognition_result['identity'])
+        score += self.priority_factors['recognition_frequency'] * freq_score
+        
+        # Mask compliance (compliant = more priority)
+        mask_status = recognition_result.get('mask_status', 'unknown')
+        mask_score = 1.0 if mask_status == 'mask' else 0.3
+        score += self.priority_factors['mask_compliance'] * mask_score
+        
+        return score
+    
+class AdaptiveProcessingEngine:
+    def __init__(self, config: Dict):
+        self.config = config
+        self.priority_thresholds = {
+            'high': 0.7,
+            'medium': 0.5,
+            'low': 0.3
+        }
+    
+    def prioritize_processing(self, faces: List[Dict]) -> List[Dict]:
+        """Sort faces by priority for processing order"""
+        if not faces:
+            return []
+        
+        # Calculate priority scores for each face
+        for face in faces:
+            face['priority_score'] = self.calculate_priority_score(face)
+        
+        # Sort by priority (highest first)
+        return sorted(faces, key=lambda x: x['priority_score'], reverse=True)
+    
+    def adaptive_resource_allocation(self, faces: List[Dict]) -> Dict:
+        """Allocate processing resources based on priority"""
+        resource_plan = {
+            'high_priority': [],
+            'medium_priority': [],
+            'low_priority': []
+        }
+        
+        for face in faces:
+            score = face['priority_score']
+            
+            if score >= self.priority_thresholds['high']:
+                # High priority: multi-scale + enhanced similarity
+                face['processing_level'] = 'enhanced'
+                resource_plan['high_priority'].append(face)
+                
+            elif score >= self.priority_thresholds['medium']:
+                # Medium priority: standard processing
+                face['processing_level'] = 'standard'
+                resource_plan['medium_priority'].append(face)
+                
+            else:
+                # Low priority: basic processing only
+                face['processing_level'] = 'basic'
+                resource_plan['low_priority'].append(face)
+        
+        return resource_plan    
+    
+class PriorityAwareRecognitionSystem(RobustFaceRecognitionSystem):
+    def __init__(self, config: Dict):
+        super().__init__(config)
+        self.priority_engine = AdaptiveProcessingEngine(config)
+        self.recognition_history = defaultdict(deque)
+        
+    def process_frame_priority_aware(self, frame: np.ndarray) -> List[Dict]:
+        """Enhanced processing with priority awareness"""
+        # Detect all faces
+        detections = self.detect_faces(frame)
+        processed_faces = []
+        
+        for detection in detections:
+            # Extract basic face ROI
+            face_roi = self._extract_face_roi(frame, detection['bbox'])
+            
+            # Initial quality assessment
+            quality_scores = self.quality_assessor.assess_face_quality(face_roi, detection['bbox'])
+            detection['quality_scores'] = quality_scores
+            
+            # Basic embedding extraction for priority calculation
+            basic_embedding = self.extract_embedding(face_roi)
+            if basic_embedding is not None:
+                detection['embedding'] = basic_embedding
+                
+                # Quick recognition for priority calculation
+                identity, confidence = self.recognize_face(basic_embedding)
+                detection['identity'] = identity
+                detection['recognition_confidence'] = confidence
+                
+                processed_faces.append(detection)
+        
+        # Prioritize faces for enhanced processing
+        prioritized_faces = self.priority_engine.prioritize_processing(processed_faces)
+        resource_plan = self.priority_engine.adaptive_resource_allocation(prioritized_faces)
+        
+        final_results = []
+        
+        # Process high-priority faces with enhanced methods
+        for high_pri_face in resource_plan['high_priority']:
+            enhanced_result = self._process_high_priority_face(frame, high_pri_face)
+            final_results.append(enhanced_result)
+        
+        # Process medium-priority with standard methods
+        for medium_pri_face in resource_plan['medium_priority']:
+            standard_result = self._process_standard_priority_face(frame, medium_pri_face)
+            final_results.append(standard_result)
+        
+        # Process low-priority with basic methods
+        for low_pri_face in resource_plan['low_priority']:
+            basic_result = self._process_low_priority_face(frame, low_pri_face)
+            final_results.append(basic_result)
+        
+        return final_results
+    
+    def _process_high_priority_face(self, frame: np.ndarray, face_data: Dict) -> Dict:
+        """Enhanced processing for high-priority faces"""
+        face_roi = self._extract_face_roi(frame, face_data['bbox'])
+        
+        # Multi-scale embedding extraction
+        if self.robust_config['enable_multi_scale']:
+            embeddings = self.multi_scale_processor.extract_multi_scale_embeddings(face_roi)
+            if embeddings:
+                enhanced_embedding = self.multi_scale_processor.fuse_embeddings(embeddings)
+                face_data['embedding'] = enhanced_embedding
+        
+        # Enhanced similarity with quality adaptation
+        quality_scores = face_data['quality_scores']
+        if self.robust_config['enable_quality_adaptive_similarity']:
+            identity, confidence, detailed_scores = self.recognize_face_quality_adaptive(
+                face_data['embedding'], quality_scores
+            )
+        else:
+            identity, confidence = self.recognize_face(face_data['embedding'])
+            detailed_scores = {}
+        
+        # Temporal fusion for stability
+        track_id = self._generate_track_id(face_data['bbox'])
+        if self.robust_config['enable_temporal_fusion']:
+            self.temporal_fusion.update_temporal_buffer(track_id, identity, confidence)
+            temporal_identity, temporal_confidence = self.temporal_fusion.get_temporal_consensus(track_id)
+            
+            if temporal_identity and temporal_confidence > confidence:
+                identity = temporal_identity
+                confidence = temporal_confidence
+        
+        face_data.update({
+            'identity': identity,
+            'recognition_confidence': confidence,
+            'detailed_scores': detailed_scores,
+            'processing_level': 'enhanced',
+            'track_id': track_id
+        })
+        
+        return face_data                    
+    
+class FairnessController:
+    def __init__(self):
+        self.recognition_counts = defaultdict(int)
+        self.recent_recognitions = deque(maxlen=100)
+        self.max_recognitions_per_person = 10  # Prevent domination
+        
+    def ensure_fair_attention(self, current_results: List[Dict]) -> List[Dict]:
+        """Ensure no single person dominates system attention"""
+        fair_results = []
+        
+        for result in current_results:
+            identity = result.get('identity')
+            if identity and identity != "Unknown":
+                # Check if this person has been recognized too frequently
+                recent_count = self._get_recent_recognition_count(identity)
+                
+                if recent_count < self.max_recognitions_per_person:
+                    fair_results.append(result)
+                    self.recognition_counts[identity] += 1
+                    self.recent_recognitions.append(identity)
+                else:
+                    # Downgrade priority for over-represented persons
+                    result['priority_score'] *= 0.5  # Reduce priority
+                    fair_results.append(result)
+            else:
+                fair_results.append(result)
+        
+        return fair_results
+    
+    def _get_recent_recognition_count(self, identity: str) -> int:
+        """Count how many times this identity was recently recognized"""
+        return sum(1 for rec in self.recent_recognitions if rec == identity)                        
                                  
 # Update your CONFIG dictionary:
 CONFIG = {
@@ -4532,7 +4951,152 @@ LEARNING_CONFIG = {
     'high_confidence_threshold': 0.8,
 }
 
+# OPTIMIZED CONFIG FOR SPECIFIC PERSON RECOGNITION
+OPTIMIZED_FACE_CONFIG = {
+    **LEARNING_CONFIG,
+    
+    # Focus on FaceSpecificSimilarityEngine
+    'similarity_engine_type': 'face_specific',
+    'fusion_mode': 'face_specific',
+    
+    # Enhanced face-specific weights based on research
+    'face_specific_weights': {
+        'cosine': 0.35,      # Best for normalized face embeddings
+        'angular': 0.30,      # Robust to lighting and pose variations  
+        'pearson': 0.20,      # Good for feature correlation in faces
+        'dot_product': 0.10,  # Works well with normalized embeddings
+        'euclidean': 0.05,    # Secondary distance measure
+    },
+    
+    # Person-specific tuning
+    'recognition_threshold': 0.55,      # Higher threshold for specific persons
+    'high_confidence_threshold': 0.75,  # Require strong matches
+    
+    # Embedding quality focus
+    'min_face_quality': 0.4,           # Require better quality for specific persons
+    'enable_multi_scale': True,         # Extract more robust embeddings
+}
 
+PRIORITY_AWARE_CONFIG = {
+    **OPTIMIZED_FACE_CONFIG,
+    
+    # Priority system settings
+    'priority_enabled': True,
+    'priority_factors': {
+        'recognition_confidence': 0.3,
+        'face_quality': 0.25, 
+        'temporal_consistency': 0.2,
+        'recognition_frequency': 0.15,
+        'mask_compliance': 0.1
+    },
+    
+    # Processing levels
+    'processing_levels': {
+        'enhanced': {
+            'multi_scale': True,
+            'quality_adaptive': True,
+            'temporal_fusion': True
+        },
+        'standard': {
+            'multi_scale': False,
+            'quality_adaptive': True,
+            'temporal_fusion': True
+        },
+        'basic': {
+            'multi_scale': False,
+            'quality_adaptive': False,
+            'temporal_fusion': False
+        }
+    },
+    
+    # Fairness controls
+    'max_recognitions_per_person': 10,
+    'priority_decay_rate': 0.1,
+    
+    # Adaptive thresholds
+    'adaptive_priority_thresholds': {
+        'high': 0.7,
+        'medium': 0.5,
+        'low': 0.3
+    }
+}
+
+# CONFIG FOR HIGH-PRIORITY PERSON RECOGNITION
+HIGH_PRIORITY_CONFIG = {
+    **OPTIMIZED_FACE_CONFIG,
+    
+    # Even stricter settings for critical persons
+    'recognition_threshold': 0.65,
+    'high_confidence_threshold': 0.85,
+    
+    # Method prioritization
+    'face_specific_weights': {
+        'angular': 0.40,    # Maximum robustness
+        'cosine': 0.35,     # High precision
+        'pearson': 0.25,    # Feature correlation
+    },
+    
+    # Quality requirements
+    'min_face_quality': 0.5,
+    'min_face_size': 80,    # Require larger faces for critical recognition
+}
+
+# CONFIG FOR MULTIPLE SPECIFIC PERSONS
+MULTI_PERSON_CONFIG = {
+    **OPTIMIZED_FACE_CONFIG,
+    
+    # Balanced settings for multiple specific persons
+    'person_specific_thresholds': {
+        'person_A': 0.6,   # Higher threshold for person A
+        'person_B': 0.55,  # Slightly lower for person B
+        'person_C': 0.7,   # Very high threshold for person C
+    },
+    
+    # Adaptive weights per person group
+    'person_groups': {
+        'high_priority': ['person_A', 'person_C'],
+        'normal_priority': ['person_B', 'person_D']
+    }
+}
+
+def create_optimized_face_system(config: Dict):
+    """Create face recognition system with optimized face-specific similarity"""
+    face_system = RobustFaceRecognitionSystem(config)
+    
+    # Replace with optimized engine
+    face_system.similarity_engine = OptimizedFaceSpecificSimilarityEngine(config)
+    
+    # Enhanced configuration for specific person recognition
+    face_system.robust_config.update({
+        'enable_person_specific_optimization': True,
+        'person_embedding_analysis': True,
+        'adaptive_threshold_per_person': True,
+    })
+    
+    print("🎯 Created system with OPTIMIZED Face-Specific Similarity Engine")
+    return face_system
+
+# Enhanced recognition method
+def recognize_specific_person_optimized(self, embedding: np.ndarray, 
+                                      target_person: str,
+                                      quality_scores: Dict[str, float] = None) -> Tuple[float, Dict]:
+    """Optimized recognition for specific target person"""
+    if target_person not in self.identity_centroids:
+        return 0.0, {}
+    
+    centroid = self.identity_centroids[target_person]
+    
+    # Use optimized similarity computation
+    similarity_scores = self.similarity_engine.compute_person_specific_similarity(
+        embedding, {target_person: centroid}, quality_scores
+    )
+    
+    score = similarity_scores.get(target_person, 0.0)
+    
+    # Get detailed method scores for analysis
+    stats = self.similarity_engine.get_person_similarity_stats(target_person)
+    
+    return score, stats
 
 # Integration with existing system
 def create_enhanced_face_system(config: Dict):
@@ -4577,7 +5141,7 @@ def validate_config(config: Dict) -> bool:
     
     return True
 
-input("Please choose the process (1 or 2)that want to be running: ")
+input("Please choose the process (1, 2, or 3)that want to be running: ")
 if 1:
     def main_enhanced():
         # Initialize system with learning capabilities
@@ -4647,7 +5211,7 @@ if 1:
 
     if __name__ == "__main__":
         main_enhanced()
-else:
+elif 2:
     def main():
         # Initialize system
         face_system = RobustFaceRecognitionSystem(ROBUST_CONFIG)
@@ -4695,4 +5259,123 @@ else:
     
 # Example usage in main system
 
-      
+elif 3:
+    def main_priority_optimized():
+        """Main function with priority-aware optimization"""
+        # Create priority-aware system
+        face_system = PriorityAwareRecognitionSystem(PRIORITY_AWARE_CONFIG)
+        processor = RealTimeProcessor(face_system=face_system, processing_interval=3)
+        
+        # Add fairness controller
+        fairness_controller = FairnessController()
+        
+        def priority_aware_callback(results: List[Dict]):
+            """Monitor system performance and fairness"""
+            # Apply fairness controls
+            fair_results = fairness_controller.ensure_fair_attention(results)
+            
+            # Log priority distribution
+            priority_levels = {'high': 0, 'medium': 0, 'low': 0}
+            for result in fair_results:
+                level = result.get('processing_level', 'basic')
+                priority_levels[level] += 1
+            
+            print(f"🎯 Priority Distribution: High={priority_levels['high']}, "
+                f"Medium={priority_levels['medium']}, Low={priority_levels['low']}")
+            
+            # Monitor recognition fairness
+            unique_identities = len(set(r['identity'] for r in fair_results if r['identity']))
+            print(f"👥 Unique identities detected: {unique_identities}")
+        
+        processor.results_callback = priority_aware_callback
+        
+        # Choose input source
+        source = select_source()
+        
+        # Configure display
+        processor.set_display_size(1280, 720, "fixed_size")
+        
+        try:
+            processor.run(source)
+        except KeyboardInterrupt:
+            print("\n🛑 Interrupted by user")
+        except Exception as e:
+            print(f"❌ Error: {e}")
+        finally:
+            processor.stop()
+
+    def select_source():
+        """Interactive source selection"""
+        sources = {
+            '1': '0',  # Default camera
+            '2': 'rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/101',
+            '3': 'http://192.168.1.101:8080/video',
+            '4': 'video.mp4'
+        }
+        
+        print("Available sources:")
+        for key, source in sources.items():
+            print(f"  {key}: {source}")
+        
+        choice = input("Select source (1-4) or enter custom RTSP URL: ").strip()
+        return sources.get(choice, choice)
+
+else:
+    def main_optimized():
+        """Main function with optimized face-specific recognition"""
+        face_system = create_optimized_face_system(OPTIMIZED_FACE_CONFIG)
+        processor = RealTimeProcessor(face_system=face_system, processing_interval=3)
+        
+        # Monitor specific persons
+        target_persons = ['Arum', 'Citra', 'Dyah', 'Farid', 'Faruq', 'Hesti', 'Nita', 'Valen', 'Widya'] # Replace with your specific persons
+        
+        def enhanced_callback(results: List[Dict]):
+            """Enhanced callback to monitor specific persons"""
+            for result in results:
+                identity = result.get('identity')
+                if identity in target_persons:
+                    confidence = result.get('recognition_confidence', 0)
+                    print(f"🎯 Target person {identity} detected with confidence: {confidence:.3f}")
+                    
+                    # Get detailed similarity stats
+                    if hasattr(face_system.similarity_engine, 'get_person_similarity_stats'):
+                        stats = face_system.similarity_engine.get_person_similarity_stats(identity)
+                        print(f"   Similarity stats: {stats}")
+        
+        # Add callback to processor (you might need to modify RealTimeProcessor to support this)
+        processor.results_callback = enhanced_callback
+        
+            # Choose your input source
+        sources = {
+            '1': '0',                          # Default camera
+            '2': 'rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/101',  # RTSP
+            '3': 'http://192.168.1.101:8080/video',                   # IP camera
+            '4': 'video.mp4'                   # Video file
+        }
+        
+        print("Available sources:")
+        for key, source in sources.items():
+            print(f"  {key}: {source}")
+        
+        choice = input("Select source (1-4) or enter custom RTSP URL: ").strip()
+        
+        if choice in sources:
+            source = sources[choice]
+        else:
+            source = choice  # Custom input
+        
+        # Configure display
+        processor.set_display_size(1280, 720, "fixed_size")
+        
+        try:
+            processor.run(source)  # Use default camera
+        except KeyboardInterrupt:
+            print("\n🛑 Interrupted by user")
+        except Exception as e:
+            print(f"❌ Error: {e}")
+        finally:
+            processor.stop() 
+
+    if __name__ == "__main__":
+        main_optimized()
+        
