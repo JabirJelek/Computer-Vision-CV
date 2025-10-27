@@ -5141,8 +5141,8 @@ def validate_config(config: Dict) -> bool:
     
     return True
 
-input("Please choose the process (1, 2, or 3)that want to be running: ")
-if 1:
+choice = input("Please choose the process (1, 2, or 3)that want to be running: ")
+if choice == '1':
     def main_enhanced():
         # Initialize system with learning capabilities
         face_system = create_enhanced_face_system(LEARNING_CONFIG)
@@ -5211,7 +5211,7 @@ if 1:
 
     if __name__ == "__main__":
         main_enhanced()
-elif 2:
+elif choice == '2':
     def main():
         # Initialize system
         face_system = RobustFaceRecognitionSystem(ROBUST_CONFIG)
@@ -5259,7 +5259,7 @@ elif 2:
     
 # Example usage in main system
 
-elif 3:
+elif choice == '3':
     def main_priority_optimized():
         """Main function with priority-aware optimization"""
         # Create priority-aware system
@@ -5268,6 +5268,22 @@ elif 3:
         
         # Add fairness controller
         fairness_controller = FairnessController()
+            
+        def select_source():
+            """Interactive source selection"""
+            sources = {
+                '1': '0',  # Default camera
+                '2': 'rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/101',
+                '3': 'http://192.168.1.101:8080/video',
+                '4': 'video.mp4'
+            }
+            
+            print("Available sources:")
+            for key, source in sources.items():
+                print(f"  {key}: {source}")
+            
+            choice = input("Select source (1-4) or enter custom RTSP URL: ").strip()
+            return sources.get(choice, choice)        
         
         def priority_aware_callback(results: List[Dict]):
             """Monitor system performance and fairness"""
@@ -5303,22 +5319,10 @@ elif 3:
             print(f"❌ Error: {e}")
         finally:
             processor.stop()
+    if __name__ == "__main__":
+        main_priority_optimized()    
 
-    def select_source():
-        """Interactive source selection"""
-        sources = {
-            '1': '0',  # Default camera
-            '2': 'rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/101',
-            '3': 'http://192.168.1.101:8080/video',
-            '4': 'video.mp4'
-        }
-        
-        print("Available sources:")
-        for key, source in sources.items():
-            print(f"  {key}: {source}")
-        
-        choice = input("Select source (1-4) or enter custom RTSP URL: ").strip()
-        return sources.get(choice, choice)
+
 
 else:
     def main_optimized():
