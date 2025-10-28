@@ -34,6 +34,302 @@ import numpy as np
 from collections import deque
 from typing import Dict, List, Tuple, Optional
 
+class ConfigManager:
+    """Unified configuration manager for hierarchical configuration management"""
+    
+    def __init__(self, base_config: Dict):
+        self.base = base_config.copy()  # Deep copy to prevent mutations
+        self.derived = self._build_derived_configs()
+        self.validation_rules = self._build_validation_rules()
+        self.config_history = deque(maxlen=10)  # Track config changes
+        
+        # Validate base config
+        self._validate_config(self.base)
+        
+        print("✅ ConfigManager initialized with unified configuration system")
+    
+    def _build_derived_configs(self) -> Dict[str, Dict]:
+        """Build all derived configurations from base"""
+        derived_configs = {}
+        
+        # Robust Face Recognition Config
+        derived_configs['robust_face_recognition'] = {
+            **self.base,
+            # Robustness enhancements
+            'enable_multi_scale': True,
+            'enable_temporal_fusion': True, 
+            'enable_quality_aware': True,
+            'enable_quality_adaptive_similarity': True,
+            'min_face_quality': 0.3,
+            'temporal_buffer_size': 10,
+            
+            # Multi-scale processing
+            'scale_factors': [0.5, 0.75, 1.0, 1.25, 1.5],
+            'rotation_angles': [-10, -5, 0, 5, 10],
+            
+            # Quality assessment weights
+            'quality_weights': {
+                'sharpness': 0.3,
+                'brightness': 0.2, 
+                'contrast': 0.15,
+                'size': 0.2,
+                'position': 0.1,
+                'blur': 0.05
+            },
+            
+            # Enhanced similarity configuration
+            'similarity_method': 'quality_adaptive',
+            'similarity_weights': {
+                'cosine': 0.25,
+                'angular': 0.40,
+                'pearson': 0.15,
+                'dot_product': 0.15,
+                'euclidean': 0.10,
+                'manhattan': 0.15,
+                'jaccard': 0.20
+            },
+        }
+        
+        # Context-Aware Processing Config
+        derived_configs['context_aware_processing'] = {
+            **derived_configs['robust_face_recognition'],
+            
+            # Context-aware scaling parameters
+            'min_processing_scale': 0.3,
+            'max_processing_scale': 2.5,
+            'scale_adjustment_step': 0.1,
+            'context_weight': 0.4,
+            'performance_weight': 0.6,
+            
+            # Enable context features
+            'enable_context_aware_scaling': True,
+        }
+        
+        # High Performance Config
+        derived_configs['high_performance'] = {
+            **self.base,
+            'processing_interval': 10,
+            'current_processing_scale': 0.6,
+            'processing_width': 640,
+            'processing_height': 480,
+            'enable_multi_scale': False,
+            'enable_temporal_fusion': False,
+            'similarity_method': 'balanced',
+        }
+        
+        # High Accuracy Config
+        derived_configs['high_accuracy'] = {
+            **derived_configs['robust_face_recognition'],
+            'processing_interval': 2,
+            'current_processing_scale': 1.5,
+            'processing_width': 1920,
+            'processing_height': 1080,
+            'detection_confidence': 0.7,
+            'recognition_threshold': 0.7,
+        }
+        
+        # Balanced Config
+        derived_configs['balanced'] = {
+            **derived_configs['robust_face_recognition'],
+            'processing_interval': 5,
+            'current_processing_scale': 1.0,
+            'processing_width': 1280,
+            'processing_height': 720,
+        }
+        
+        return derived_configs
+    
+    def _build_validation_rules(self) -> Dict[str, any]:
+        """Build configuration validation rules"""
+        return {
+            'detection_confidence': {'min': 0.0, 'max': 1.0, 'type': float},
+            'recognition_threshold': {'min': 0.0, 'max': 1.0, 'type': float},
+            'mask_detection_threshold': {'min': 0.0, 'max': 1.0, 'type': float},
+            'processing_interval': {'min': 1, 'max': 60, 'type': int},
+            'min_processing_scale': {'min': 0.1, 'max': 1.0, 'type': float},
+            'max_processing_scale': {'min': 1.0, 'max': 5.0, 'type': float},
+            'min_face_quality': {'min': 0.0, 'max': 1.0, 'type': float},
+            'temporal_buffer_size': {'min': 1, 'max': 50, 'type': int},
+        }
+    
+    def _validate_config(self, config: Dict) -> bool:
+        """Validate configuration against rules"""
+        errors = []
+        
+        for key, rules in self.validation_rules.items():
+            if key in config:
+                value = config[key]
+                # Type check
+                if not isinstance(value, rules['type']):
+                    errors.append(f"{key}: expected {rules['type']}, got {type(value)}")
+                # Range check
+                elif 'min' in rules and value < rules['min']:
+                    errors.append(f"{key}: value {value} below minimum {rules['min']}")
+                elif 'max' in rules and value > rules['max']:
+                    errors.append(f"{key}: value {value} above maximum {rules['max']}")
+        
+        if errors:
+            print("❌ Configuration validation errors:")
+            for error in errors:
+                print(f"   - {error}")
+            return False
+        
+        return True
+    
+    def get_component_config(self, component_name: str) -> Dict:
+        """Get configuration for specific component"""
+        if component_name in self.derived:
+            config = self.derived[component_name]
+            # Log config usage
+            self.config_history.append({
+                'component': component_name,
+                'timestamp': time.time(),
+                'config_keys': list(config.keys())[:5]  # First 5 keys for logging
+            })
+            return config
+        else:
+            print(f"⚠️  Config for '{component_name}' not found, using base config")
+            return self.base
+    
+    def get_available_configs(self) -> List[str]:
+        """Get list of available configuration profiles"""
+        return ['base'] + list(self.derived.keys())
+    
+    def create_custom_config(self, profile_name: str, base_profile: str, overrides: Dict) -> bool:
+        """Create a custom configuration profile"""
+        if profile_name in self.derived:
+            print(f"❌ Config profile '{profile_name}' already exists")
+            return False
+        
+        # Get base profile
+        if base_profile == 'base':
+            base_config = self.base
+        elif base_profile in self.derived:
+            base_config = self.derived[base_profile]
+        else:
+            print(f"❌ Base profile '{base_profile}' not found")
+            return False
+        
+        # Apply overrides
+        custom_config = {**base_config, **overrides}
+        
+        # Validate
+        if not self._validate_config(custom_config):
+            return False
+        
+        # Store
+        self.derived[profile_name] = custom_config
+        print(f"✅ Created custom config profile: '{profile_name}'")
+        return True
+    
+    def update_config_value(self, profile_name: str, key: str, value: any) -> bool:
+        """Update a specific configuration value"""
+        if profile_name == 'base':
+            config = self.base
+        elif profile_name in self.derived:
+            config = self.derived[profile_name]
+        else:
+            print(f"❌ Config profile '{profile_name}' not found")
+            return False
+        
+        # Validate the update
+        if key in self.validation_rules:
+            rules = self.validation_rules[key]
+            if not isinstance(value, rules['type']):
+                print(f"❌ Invalid type for {key}: expected {rules['type']}")
+                return False
+            if 'min' in rules and value < rules['min']:
+                print(f"❌ Value for {key} below minimum {rules['min']}")
+                return False
+            if 'max' in rules and value > rules['max']:
+                print(f"❌ Value for {key} above maximum {rules['max']}")
+                return False
+        
+        # Apply update
+        old_value = config.get(key)
+        config[key] = value
+        print(f"🔄 Updated {profile_name}.{key}: {old_value} → {value}")
+        return True
+    
+    def get_config_info(self, profile_name: str = None) -> Dict:
+        """Get information about configuration profiles"""
+        if profile_name:
+            if profile_name == 'base':
+                config = self.base
+            elif profile_name in self.derived:
+                config = self.derived[profile_name]
+            else:
+                return {'error': f"Profile '{profile_name}' not found"}
+            
+            return {
+                'profile_name': profile_name,
+                'key_count': len(config),
+                'sample_keys': list(config.keys())[:10],
+                'validation_status': self._validate_config(config)
+            }
+        else:
+            # Return info for all profiles
+            info = {
+                'base': {
+                    'key_count': len(self.base),
+                    'validation_status': self._validate_config(self.base)
+                }
+            }
+            for name, config in self.derived.items():
+                info[name] = {
+                    'key_count': len(config),
+                    'validation_status': self._validate_config(config)
+                }
+            return info
+    
+    def export_config(self, profile_name: str, filepath: str = None) -> bool:
+        """Export configuration to JSON file"""
+        if profile_name == 'base':
+            config = self.base
+        elif profile_name in self.derived:
+            config = self.derived[profile_name]
+        else:
+            print(f"❌ Config profile '{profile_name}' not found")
+            return False
+        
+        try:
+            if filepath is None:
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                filepath = f"config_{profile_name}_{timestamp}.json"
+            
+            with open(filepath, 'w') as f:
+                json.dump(config, f, indent=2)
+            
+            print(f"✅ Exported config '{profile_name}' to {filepath}")
+            return True
+        except Exception as e:
+            print(f"❌ Failed to export config: {e}")
+            return False
+    
+    def import_config(self, filepath: str, profile_name: str = None) -> bool:
+        """Import configuration from JSON file"""
+        try:
+            with open(filepath, 'r') as f:
+                imported_config = json.load(f)
+            
+            # Determine profile name
+            if profile_name is None:
+                profile_name = Path(filepath).stem
+            
+            # Validate imported config
+            if not self._validate_config(imported_config):
+                return False
+            
+            # Store as custom profile
+            self.derived[profile_name] = imported_config
+            print(f"✅ Imported config as '{profile_name}' from {filepath}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Failed to import config: {e}")
+            return False
+
+
 class SceneContextAnalyzer:
     """Advanced scene context analysis for intelligent scaling decisions"""
     
@@ -568,10 +864,7 @@ class EnhancedSimilarityEngine:
         self.embedding_covariance = None
         self.embedding_mean = None
         self.covariance_inv = None
-        
-    def _extract_single_embedding(self, face_roi: np.ndarray) -> Optional[np.ndarray]:
-        """Placeholder - actual extraction should be handled by the main system"""
-        return None        
+              
         
     def compute_similarity_matrix(self, embedding: np.ndarray, centroids: Dict[str, np.ndarray]) -> Dict[str, float]:
         """Compute multiple similarity scores and return weighted combination"""
@@ -2334,35 +2627,7 @@ class RealTimeProcessor:
         
         print("🖼️  Enhanced image logging system READY") 
         print("🔊 Voice alert system READY")
-            
-    def enhanced_dynamic_adjustment(self, frame: np.ndarray, results: List[Dict], 
-                                original_shape: Tuple[int, int]) -> bool:
-        """Enhanced dynamic adjustment with scene context awareness"""
-        if not self.dynamic_adjustment_enabled or self.adjustment_cooldown > 0:
-            return False
-        
-        # Only adjust periodically to avoid oscillation
-        if self.frame_count % self.adaptive_check_interval != 0:
-            return False
-        
-        # Analyze detection performance
-        performance = self.analyze_detection_performance(results, original_shape)
-        
-        if self.enable_context_awareness and hasattr(self, 'context_aware_scaler'):
-            # Use context-aware scaling
-            optimal_scale = self.context_aware_scaler.compute_optimal_scale(
-                frame, results, performance
-            )
-            
-            # Apply the adjustment
-            adjustment_made = self.context_aware_scaler.apply_scale_adjustment(optimal_scale)
-            
-            if adjustment_made:
-                self.current_processing_scale = self.context_aware_scaler.current_scale
-                return True
-        
-        return False
-    
+             
     def enhanced_dynamic_adjustment(self, frame: np.ndarray, results: List[Dict], 
                                   original_shape: Tuple[int, int]) -> bool:
         """Enhanced dynamic adjustment with scene context awareness"""
@@ -3981,42 +4246,6 @@ class RealTimeProcessor:
         else:
             print("   Use 'l' to enable detailed face logging")
 
-    def draw_tracking_info(self, frame: np.ndarray, results: List[Dict]):
-        """Draw tracking status on frame"""
-        for result in results:
-            x1, y1, x2, y2 = result['bbox']
-            identity = result['identity']
-            track_state = result.get('track_state', 'NEW')
-            track_id = result.get('track_id', 'N/A')
-            
-            # Color coding based on track state
-            if track_state == 'COOLDOWN':
-                color = (0, 255, 255)  # Yellow - trusted identity
-                label = f"{identity} ✓"
-            elif track_state == 'TRACKING':
-                color = (0, 255, 0)    # Green - building confidence
-                conf_count = next((t['confidence_count'] for t in self.face_tracker.active_tracks.values() 
-                                if t.get('current_bbox') == result['bbox']), 0)
-                label = f"{identity} ({conf_count}/{self.face_tracker.confidence_frames})"
-            else:  
-                color = (0, 0, 255)    # Red - new/unconfirmed
-                label = f"{identity} ?" if identity else "Unknown"
-            
-            # Draw bounding box with track state
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            
-            # Draw label with track info
-            label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-            cv2.rectangle(frame, (x1, y1 - label_size[1] - 10), 
-                        (x1 + label_size[0], y1), color, -1)
-            cv2.putText(frame, label, (x1, y1 - 5), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-            
-            # Draw track ID for debugging
-            if self.debug_mode:
-                cv2.putText(frame, f"Track: {track_id}", (x1, y2 + 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)            
-
     def _prepare_display_results(self, results: List[Dict], original_frame: np.ndarray, display_frame: np.ndarray) -> List[Dict]:
         """Scale results to display coordinates"""
         if not results:
@@ -4900,8 +5129,6 @@ CONTEXT_AWARE_CONFIG = {
     # Enable context features
     'enable_context_aware_scaling': True,
 }
-
-
 
 # Enhanced recognition method
 def recognize_specific_person_optimized(self, embedding: np.ndarray, 
