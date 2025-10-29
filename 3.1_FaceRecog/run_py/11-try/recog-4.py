@@ -20,13 +20,8 @@ from scipy.spatial.distance import mahalanobis
 from sklearn.metrics.pairwise import paired_distances
 
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.svm import SVC
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score, f1_score
-import pickle
 from collections import defaultdict, deque
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional
 import time
 
 import cv2
@@ -1112,7 +1107,6 @@ class EnhancedSimilarityEngine:
                     continue
         
         return total_score / total_weight if total_weight > 0 else 0.0
-
 
 class AdaptiveWeightSimilarityEngine(EnhancedSimilarityEngine):
     """Online weight optimization based on method performance"""
