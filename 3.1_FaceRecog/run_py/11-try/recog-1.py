@@ -324,6 +324,254 @@ class ConfigManager:
             print(f"❌ Failed to import config: {e}")
             return False
 
+class DurationAwareAlertManager:
+    def __init__(self, config: Dict):
+        self.config = config
+        self.server_url = config.get('alert_server_url')
+        self.cooldown_seconds = config.get('alert_cooldown_seconds', 30)
+        self.enabled = config.get('enable_voice_alerts', True)
+        self.last_alert_time = 0
+        self.alert_lock = threading.Lock()
+        
+        # 🆕 Duration tracking parameters
+        self.min_violation_frames = config.get('min_violation_frames', 20)  # 2 seconds at 10 FPS
+        self.min_violation_seconds = config.get('min_violation_seconds', 2.0)
+        self.max_gap_frames = config.get('max_gap_frames', 5)  # Allow 5-frame gaps
+        
+        # 🆕 Violation duration tracking per identity
+        self.violation_timers = {}  # identity -> {'start_time': timestamp, 'frame_count': int, 'start_frame': int, 'continuous': bool}
+        self.alerted_identities = set()  # Track identities we've already alerted for
+        
+        print(f"🔊 Duration-aware alerts: {self.min_violation_frames} frames / {self.min_violation_seconds}s threshold")
+
+    def update_violation_duration(self, violations: List[Dict], current_frame_count: int):
+        """Update violation duration tracking for each identity"""
+        current_time = time.time()
+        current_violators = set()
+        
+        for violation in violations:
+            identity = violation.get('identity', 'Unknown')
+            current_violators.add(identity)
+            
+            # Start or update timer for this identity
+            if identity not in self.violation_timers:
+                self.violation_timers[identity] = {
+                    'start_time': current_time,
+                    'start_frame': current_frame_count,
+                    'frame_count': 1,
+                    'continuous': True,
+                    'last_frame': current_frame_count
+                }
+            else:
+                # Update existing timer
+                timer = self.violation_timers[identity]
+                
+                # Check for continuity
+                frame_gap = current_frame_count - timer['last_frame']
+                if frame_gap <= self.max_gap_frames + 1:  # Allow small gaps
+                    timer['frame_count'] += 1
+                    timer['continuous'] = True
+                else:
+                    # Large gap detected - reset but keep identity
+                    timer['start_time'] = current_time
+                    timer['start_frame'] = current_frame_count
+                    timer['frame_count'] = 1
+                    timer['continuous'] = True
+                    # Remove from alerted set since it's a new violation period
+                    if identity in self.alerted_identities:
+                        self.alerted_identities.remove(identity)
+                
+                timer['last_frame'] = current_frame_count
+        
+        # Remove identities that are no longer violating
+        expired_identities = []
+        for identity, timer in self.violation_timers.items():
+            if identity not in current_violators:
+                # Check if we should keep tracking for small gaps
+                frame_gap = current_frame_count - timer['last_frame']
+                if frame_gap > self.max_gap_frames:
+                    expired_identities.append(identity)
+                # else: keep in timers for gap tolerance
+        
+        for identity in expired_identities:
+            self._reset_violation_timer(identity)
+
+    def _reset_violation_timer(self, identity: str):
+        """Reset violation timer for an identity"""
+        if identity in self.violation_timers:
+            del self.violation_timers[identity]
+        if identity in self.alerted_identities:
+            self.alerted_identities.remove(identity)
+
+    def should_trigger_alert(self, identity: str) -> bool:
+        """Check if violation duration meets threshold for alert"""
+        if identity not in self.violation_timers:
+            return False
+            
+        timer = self.violation_timers[identity]
+        
+        # Check frame count threshold
+        frame_condition = timer['frame_count'] >= self.min_violation_frames
+        
+        # Check time duration threshold  
+        time_condition = (time.time() - timer['start_time']) >= self.min_violation_seconds
+        
+        # Check if violation is continuous
+        continuous_condition = timer.get('continuous', True)
+        
+        # Check if we haven't already alerted for this identity in current violation
+        not_already_alerted = identity not in self.alerted_identities
+        
+        return frame_condition and time_condition and continuous_condition and not_already_alerted
+
+    def get_violation_duration_info(self, identity: str) -> Dict[str, float]:
+        """Get duration information for an identity"""
+        if identity not in self.violation_timers:
+            return {'frames': 0, 'seconds': 0.0}
+        
+        timer = self.violation_timers[identity]
+        return {
+            'frames': timer['frame_count'],
+            'seconds': time.time() - timer['start_time']
+        }
+
+    def trigger_duration_alert(self, violations: List[Dict], current_frame_count: int) -> bool:
+        """Main method to check and trigger duration-based alerts"""
+        if not self.enabled or not self.server_url:
+            return False
+        
+        # Update violation duration tracking
+        self.update_violation_duration(violations, current_frame_count)
+        
+        # Find identities that meet duration threshold
+        alert_identities = []
+        for violation in violations:
+            identity = violation.get('identity', 'Unknown')
+            if self.should_trigger_alert(identity):
+                alert_identities.append(identity)
+        
+        if not alert_identities:
+            return False
+        
+        # Generate and send alert
+        success = self._send_violation_alert(alert_identities, violations)
+        
+        # Mark these identities as alerted
+        if success:
+            for identity in alert_identities:
+                self.alerted_identities.add(identity)
+                duration_info = self.get_violation_duration_info(identity)
+                print(f"🚨 Duration alert triggered for {identity} "
+                      f"({duration_info['frames']} frames, {duration_info['seconds']:.1f}s)")
+        
+        return success
+
+    def _send_violation_alert(self, alert_identities: List[str], all_violations: List[Dict]) -> bool:
+        """Send voice alert for violations that meet duration threshold"""
+        # Filter violations to only those that triggered alerts
+        alert_violations = [v for v in all_violations if v.get('identity') in alert_identities]
+        
+        if not alert_violations:
+            return False
+            
+        # Count recognized vs unknown violators
+        recognized = [v for v in alert_violations if v['identity'] and v['identity'] != 'Unknown']
+        unknown = [v for v in alert_violations if not v['identity'] or v['identity'] == 'Unknown']
+        
+        if recognized:
+            # Alert for recognized people by name
+            names = [v['identity'] for v in recognized]
+            if len(names) == 1:
+                message = f"Perhatian, {names[0]} tidak memakai masker"
+            else:
+                name_list = " dan ".join(names)
+                message = f"Perhatian, {name_list} tidak memakai masker"
+        else:
+            # Alert for unknown people
+            count = len(unknown)
+            if count == 1:
+                message = "Perhatian, satu orang tidak dikenal tidak memakai masker"
+            else:
+                message = f"Perhatian, {count} orang tidak dikenal tidak memakai masker"
+        
+        # Add duration information for the first identity
+        if alert_identities:
+            first_identity = alert_identities[0]
+            duration_info = self.get_violation_duration_info(first_identity)
+            message += f" selama {duration_info['seconds']:.1f} detik"
+        
+        # Add urgency for multiple violations
+        total_violations = len(alert_violations)
+        if total_violations > 2:
+            message += ". Situasi darurat!"
+        
+        # Send the alert
+        return self.send_voice_alert(message)
+
+    def send_voice_alert(self, message: str, identity: str = None, mask_status: str = None) -> bool:
+        """Send voice alert to server in non-blocking thread (original method preserved)"""
+        if not self.enabled or not self.server_url:
+            return False
+            
+        # Rate limiting
+        current_time = time.time()
+        with self.alert_lock:
+            if current_time - self.last_alert_time < self.cooldown_seconds:
+                return False
+            self.last_alert_time = current_time
+        
+        # Run in background thread to avoid blocking main processing
+        thread = threading.Thread(
+            target=self._send_alert_thread,
+            args=(message, identity, mask_status),
+            daemon=True
+        )
+        thread.start()
+        return True
+
+    def _send_alert_thread(self, message: str, identity: str, mask_status: str):
+        """Background thread for sending alerts"""
+        try:
+            # URL encode the message
+            encoded_message = quote(message)
+            alert_url = f"{self.server_url}?pesan={encoded_message}"
+            
+            # Send HTTP request with timeout
+            response = requests.get(alert_url, timeout=5)
+            
+            if response.status_code == 200:
+                print(f"🔊 Voice alert sent: {message}")
+            else:
+                print(f"❌ Alert server returned status: {response.status_code}")
+                
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Failed to send voice alert: {e}")
+        except Exception as e:
+            print(f"❌ Unexpected error in alert thread: {e}")
+
+    def toggle_alerts(self):
+        """Toggle voice alerts on/off"""
+        self.enabled = not self.enabled
+        status = "ENABLED" if self.enabled else "DISABLED"
+        print(f"🔊 Voice alerts: {status}")
+        return self.enabled
+
+    def get_duration_stats(self) -> Dict:
+        """Get current duration tracking statistics"""
+        stats = {
+            'total_tracked_identities': len(self.violation_timers),
+            'alerted_identities': list(self.alerted_identities),
+            'violation_timers': {}
+        }
+        
+        for identity, timer in self.violation_timers.items():
+            stats['violation_timers'][identity] = {
+                'frame_count': timer['frame_count'],
+                'duration_seconds': time.time() - timer['start_time'],
+                'continuous': timer.get('continuous', True)
+            }
+        
+        return stats
 
 class SceneContextAnalyzer:
     """Advanced scene context analysis for intelligent scaling decisions"""
@@ -1294,8 +1542,6 @@ class AdaptiveWeightSimilarityEngine(EnhancedSimilarityEngine):
             stats['method_performance'][method_name] = self.calculate_method_performance(method_name)
             
         return stats
-   
-# Integrated Learning Similarity Engine that combines all approaches
 
 class MultiScaleFaceProcessor:
     def __init__(self, config: Dict):
@@ -2099,7 +2345,6 @@ class RobustFaceRecognitionSystem(FaceRecognitionSystem):
             'enable_multi_scale': config.get('enable_multi_scale', True),
             'enable_temporal_fusion': config.get('enable_temporal_fusion', True),
             'enable_quality_aware': config.get('enable_quality_aware', True),
-            'enable_balanced_similarity': True,  # 🆕 New flag
             'min_face_quality': config.get('min_face_quality', 0.3),
             'temporal_buffer_size': config.get('temporal_buffer_size', 10),
         }
@@ -2218,26 +2463,6 @@ class RobustFaceRecognitionSystem(FaceRecognitionSystem):
         if results:
             avg_quality = np.mean([r.get('quality_scores', {}).get('overall', 0) for r in results])
             self.debug_stats.setdefault('avg_face_quality', deque(maxlen=50)).append(avg_quality)
-  
-    def get_quality_adaptive_stats(self) -> Dict:
-        """Get statistics about quality-adaptive similarity usage"""
-        stats = self.similarity_engine.get_profile_statistics()
-        
-        # Add quality assessment statistics
-        quality_scores = []
-        for result in getattr(self, 'last_results', []):
-            if 'quality_scores' in result:
-                quality_scores.append(result['quality_scores'].get('overall', 0))
-        
-        if quality_scores:
-            stats['quality_distribution'] = {
-                'avg_quality': np.mean(quality_scores),
-                'min_quality': np.min(quality_scores),
-                'max_quality': np.max(quality_scores),
-                'faces_assessed': len(quality_scores)
-            }
-        
-        return stats    
        
     def recognize_face_quality_adaptive(self, embedding: np.ndarray, 
                                     quality_scores: Dict[str, float]) -> Tuple[Optional[str], float, Dict]:
@@ -2278,35 +2503,6 @@ class RobustFaceRecognitionSystem(FaceRecognitionSystem):
         center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
         return hash(f"{center_x}_{center_y}") % 1000000
          
-    def recognize_face_balanced(self, embedding: np.ndarray, 
-                              centroids: Dict[str, np.ndarray]) -> Tuple[Optional[str], float, Dict]:
-        """Enhanced recognition with balanced similarity methods"""
-        
-        if not centroids:
-            return None, 0.0, {}
-        
-        # Use balanced similarity engine
-        similarity_scores = self.similarity_engine.compute_balanced_similarity(
-            embedding, centroids
-        )
-        
-        # Find best match
-        best_identity = None
-        best_score = 0.0
-        detailed_scores = {}
-        
-        for identity, score in similarity_scores.items():
-            detailed_scores[identity] = score
-            if score > best_score and score >= self.config['recognition_threshold']:
-                best_score = score
-                best_identity = identity
-        
-        # Debug output
-        if self.config.get('verbose', False) and best_identity:
-            print(f"✅ Balanced recognition: {best_identity} (score: {best_score:.3f})")
-        
-        return best_identity, best_score, detailed_scores
-
     def get_balanced_stats(self) -> Dict:
         """Get balanced engine statistics"""
         stats = self.similarity_engine.get_engine_stats()
@@ -2611,40 +2807,12 @@ class RealTimeProcessor:
         self.min_save_interval = 2.0  # Minimum seconds between saves
         
         # 🆕 VOICE ALERT SYSTEM
-        self.alert_manager = AlertManager(self.config)
+        self.alert_manager = DurationAwareAlertManager(self.config)
         self.sent_alerts = set()  # Track alerted identities to avoid duplicates
         
         print("🖼️  Enhanced image logging system READY") 
         print("🔊 Voice alert system READY")
              
-    def enhanced_dynamic_adjustment(self, frame: np.ndarray, results: List[Dict], 
-                                  original_shape: Tuple[int, int]) -> bool:
-        """Enhanced dynamic adjustment with scene context awareness"""
-        if not self.dynamic_adjustment_enabled or self.adjustment_cooldown > 0:
-            return False
-        
-        # Only adjust periodically to avoid oscillation
-        if self.frame_count % self.adaptive_check_interval != 0:
-            return False
-        
-        # Analyze detection performance
-        performance = self.analyze_detection_performance(results, original_shape)
-        
-        if self.enable_context_awareness:
-            # Use context-aware scaling
-            optimal_scale = self.context_aware_scaler.compute_optimal_scale(
-                frame, results, performance
-            )
-            
-            # Apply the adjustment
-            adjustment_made = self.context_aware_scaler.apply_scale_adjustment(optimal_scale)
-            
-            if adjustment_made:
-                self.current_processing_scale = self.context_aware_scaler.current_scale
-                return True
-        
-        return False
-
     def toggle_context_awareness(self):
         """Toggle context-aware scaling"""
         self.enable_context_awareness = not self.enable_context_awareness
@@ -2677,33 +2845,6 @@ class RealTimeProcessor:
                 print(f"   {count:2}x {reason}")
         
         print("="*60)
-
-    def draw_context_info(self, frame: np.ndarray, context: Dict[str, float]):
-        """Draw context analysis information on frame"""
-        if not self.context_debug_mode:
-            return
-        
-        h, w = frame.shape[:2]
-        
-        # Create overlay
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (10, 10), (300, 180), (0, 0, 0), -1)
-        cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
-        
-        # Context metrics
-        metrics = [
-            f"Face Density: {context.get('face_density', 0):.3f}",
-            f"Scene Complexity: {context.get('scene_complexity', 0):.3f}",
-            f"Lighting: {context.get('lighting_conditions', 0):.3f}",
-            f"Motion Level: {context.get('motion_level', 0):.3f}",
-            f"Focus Quality: {context.get('focus_quality', 0):.3f}",
-            f"Current Scale: {self.current_processing_scale:.2f}x"
-        ]
-        
-        for i, metric in enumerate(metrics):
-            y_pos = 40 + (i * 25)
-            cv2.putText(frame, metric, (20, y_pos),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)    
 
     def update_dynamic_system(self):
         """Update dynamic adjustment system state"""
@@ -2786,30 +2927,37 @@ class RealTimeProcessor:
         ]        
         
     def check_and_send_alerts(self, results: List[Dict]):
-        """Check for mask violations and send voice alerts"""
+        """Enhanced alert checking with duration thresholds"""
         if not self.alert_manager.enabled:
             return
             
-        current_time = time.time()
-        violations = []
-        
+        # Detect current violations
+        current_violations = []
         for result in results:
             if (result.get('mask_status') == 'no_mask' and 
                 result.get('mask_confidence', 0) > 0.3):
                 
-                identity = result.get('identity', 'Unknown')
-                mask_conf = result.get('mask_confidence', 0)
-                
-                violations.append({
-                    'identity': identity,
-                    'mask_confidence': mask_conf,
+                current_violations.append({
+                    'identity': result.get('identity', 'Unknown'),
+                    'mask_confidence': result.get('mask_confidence', 0),
                     'bbox': result['bbox']
                 })
         
-        # Send alert if we have violations
-        if violations:
-            self._send_violation_alert(violations)
-    
+        # Use duration-aware alerting
+        self.alert_manager.trigger_duration_alert(current_violations, self.frame_count)
+        
+        # 🆕 Optional: Print duration tracking debug info
+        if self.config.get('verbose_duration_tracking', False) and current_violations:
+            self._print_duration_debug(current_violations)
+            
+    def _print_duration_debug(self, violations: List[Dict]):
+        """Print duration tracking debug information"""
+        for violation in violations[:2]:  # Only first 2 to avoid spam
+            identity = violation.get('identity', 'Unknown')
+            duration_info = self.alert_manager.get_violation_duration_info(identity)
+            if duration_info['frames'] > 0:
+                print(f"🔄 Tracking: {identity} - {duration_info['frames']} frames, {duration_info['seconds']:.1f}s")            
+            
     def _send_violation_alert(self, violations: List[Dict]):
         """Send voice alert for mask violations"""
         # Count recognized vs unknown violators
@@ -2868,18 +3016,6 @@ class RealTimeProcessor:
             if self.config.get('verbose', False):
                 print(f"Frame acquisition skipped: {e}")
             return None        
-
-
-    def set_processing_resolution(self, width: int, height: int):
-        """Set the resolution for processing (face detection/recognition)"""
-        self.processing_width = width
-        self.processing_height = height
-        print(f"⚙️  Processing resolution set to {width}x{height}")
-    
-    def set_processing_scale(self, scale: float):
-        """Set scale factor for processing resolution"""
-        self.processing_scale = scale
-        print(f"⚙️  Processing scale set to {scale:.2f}")
             
     def setup_image_logging(self, csv_filename: str = None):
         """Setup image logging folder structure matching CSV filename"""
@@ -3443,12 +3579,6 @@ class RealTimeProcessor:
         print("🚨 Maximum reconnection attempts reached")
         return False
 
-            
-    def get_current_frame(self) -> Optional[np.ndarray]:
-        """Get the latest frame from the capture thread"""
-        with self.frame_lock:
-            return self.latest_frame.copy() if self.latest_frame is not None else None  
-
     def should_process_frame(self) -> bool:
         """Adaptive frame processing based on system load"""
         current_time = time.time()
@@ -3542,7 +3672,7 @@ class RealTimeProcessor:
             self.log_file = None
             self.image_log_folder = None
             self.log_start_time = None
-                                    
+                                     
     def collect_log_data(self, results: List[Dict]) -> List[Dict]:
         """Collect individual face recognition and mask status data - FIXED"""
         log_entries = []
@@ -3620,37 +3750,7 @@ class RealTimeProcessor:
         except Exception as e:
             print(f"❌ Failed to setup logging: {e}")
             self.logging_enabled = False
-            self.log_file = None
-                
-    def toggle_logging(self, filename: str = None):
-        """Toggle both CSV and image logging with coordinated setup"""
-        if not self.logging_enabled:
-            # Enable both CSV and image logging
-            self.setup_logging(filename)
-            self.setup_image_logging(self.log_file)  # Use same base filename
-            self.logging_enabled = True
-            self.image_logging_enabled = True
-            self.log_counter = 0
-            self.saved_image_count = 0
-            print("🟢 Enhanced logging STARTED")
-            print("   - CSV: timestamp, identity, mask_status")
-            print("   - Images: jpeg frames for mask violations")
-            print(f"   - Image folder: {self.image_log_folder}")
-        else:
-            # Disable both
-            if self.log_file:
-                duration = datetime.datetime.now() - self.log_start_time
-                print(f"🔴 Logging STOPPED: {self.log_file}")
-                print(f"   - Duration: {duration}")
-                print(f"   - CSV entries: {self.log_counter}")
-                print(f"   - Violation images: {self.saved_image_count}")
-            
-            self.logging_enabled = False
-            self.image_logging_enabled = False
-            self.log_file = None
-            self.image_log_folder = None
-            self.log_start_time = None
-                                    
+            self.log_file = None                                  
 
     def take_annotated_snapshot(self, frame: np.ndarray):
         """Take snapshot with overlay information"""
@@ -3670,10 +3770,7 @@ class RealTimeProcessor:
         
         # Save frame
         cv2.imwrite(filename, annotated_frame)
-        print(f"📸 Annotated snapshot saved: {filename}")            
-            
-                           
-                                
+        print(f"📸 Annotated snapshot saved: {filename}")                                     
         
     def set_display_size(self, width: int, height: int, method: str = "fixed_size"):
         """Set fixed display size"""
@@ -3708,7 +3805,6 @@ class RealTimeProcessor:
         status = "ON" if self.show_resize_info else "OFF"
         print(f"📊 Resize info display: {status}")
 
-    # Debug control methods
     def toggle_debug_mode(self):
         """Toggle comprehensive debug mode"""
         self.debug_mode = not self.debug_mode
@@ -4055,6 +4151,31 @@ class RealTimeProcessor:
             filename = f'captured_frame_{timestamp}.jpg'
             cv2.imwrite(filename, display_frame)
             print(f"💾 Frame saved: {filename}")
+                
+        elif key == ord('D'):  # Print duration tracking statistics
+            stats = self.alert_manager.get_duration_stats()
+            print("\n" + "="*50)
+            print("📊 DURATION TRACKING STATISTICS")
+            print("="*50)
+            print(f"Tracked Identities: {stats['total_tracked_identities']}")
+            print(f"Alerted Identities: {len(stats['alerted_identities'])}")
+            
+            for identity, timer_info in stats['violation_timers'].items():
+                status = "✅ ALERTED" if identity in stats['alerted_identities'] else "🔄 TRACKING"
+                print(f"  {identity}: {timer_info['frame_count']} frames, "
+                    f"{timer_info['duration_seconds']:.1f}s - {status}")
+            print("="*50)
+            
+        elif key == ord('R'):  # Reset all duration tracking
+            self.alert_manager.violation_timers.clear()
+            self.alert_manager.alerted_identities.clear()
+            print("🔄 Duration tracking reset")
+            
+        elif key == ord('F'):  # Adjust frame threshold
+            current = self.alert_manager.min_violation_frames
+            new_threshold = max(5, (current + 5) % 60)  # Cycle 5-55 frames
+            self.alert_manager.min_violation_frames = new_threshold
+            print(f"🎯 Frame threshold: {current} → {new_threshold} frames")            
             
         elif key == ord('+'):  # Increase processing interval (process fewer frames)
             old_interval = self.processing_interval
@@ -4583,7 +4704,8 @@ class RealTimeProcessor:
         print("    - CSV: timestamp, identity, mask_status")
         print("    - Images: jpeg frames for mask violations")
         print("    - Organized folder structure")
-        print("    - Voice alerts for mask violations")
+        print("    - Voice alerts for mask violations")  
+        
         
         print("="*60)
         print()
@@ -4784,7 +4906,7 @@ class FairnessController:
 CONFIG = {
     'detection_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\yolov11n-face.pt',
     'mask_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\run_py\mask_detector112.onnx',  
-    'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\person_folder_1.json',
+    'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\person_folder_2.json',
     'detection_confidence': 0.6,
     'detection_iou': 0.6,
     'mask_detection_threshold': 0.85,  
@@ -4796,9 +4918,15 @@ CONFIG = {
     'enable_face_tracking': True,
     'tracking_max_age': 100,
     
-    # 🆕 VOICE ALERT CONFIGURATION
+    # 🆕 Duration threshold settings
+    'min_violation_frames': 20,      # 2 seconds at 10 FPS
+    'min_violation_seconds': 2.0,    # Minimum 2 seconds continuous violation
+    'max_gap_frames': 5,             # Allow 5-frame gaps in tracking
+    'verbose_duration_tracking': True,  # Print debug info
+    
+    # Existing alert settings
     'alert_server_url': 'https://your-domain.my.id/actions/a_notifikasi_suara_speaker.php',
-    'alert_cooldown_seconds': 120,  # Prevent spam
+    'alert_cooldown_seconds': 120,
     'enable_voice_alerts': True,
 }
 
@@ -4866,27 +4994,6 @@ CONTEXT_AWARE_CONFIG = {
 }
 
 # Enhanced recognition method
-def recognize_specific_person_optimized(self, embedding: np.ndarray, 
-                                      target_person: str,
-                                      quality_scores: Dict[str, float] = None) -> Tuple[float, Dict]:
-    """Optimized recognition for specific target person"""
-    if target_person not in self.identity_centroids:
-        return 0.0, {}
-    
-    centroid = self.identity_centroids[target_person]
-    
-    # Use optimized similarity computation
-    similarity_scores = self.similarity_engine.compute_person_specific_similarity(
-        embedding, {target_person: centroid}, quality_scores
-    )
-    
-    score = similarity_scores.get(target_person, 0.0)
-    
-    # Get detailed method scores for analysis
-    stats = self.similarity_engine.get_person_similarity_stats(target_person)
-    
-    return score, stats
-
 def validate_config(config: Dict) -> bool:
     """Validate configuration parameters"""
     required_keys = ['detection_model_path', 'embeddings_db_path', 'detection_confidence']
@@ -4915,10 +5022,10 @@ def main_priority_optimized():
     # Add fairness controller
     fairness_controller = FairnessController()
     
-    print("🚀 Starting with BALANCED similarity engine")
-    print("   - Methods: cosine, angular, pearson, manhattan, jaccard")
-    print("   - Weights: [0.30, 0.25, 0.20, 0.15, 0.10]")
-    print("   - No quality profiles used")    
+    print("🚀 Starting with DURATION-AWARE ALERT SYSTEM")
+    print(f"   - Minimum: {CONTEXT_AWARE_CONFIG['min_violation_frames']} frames "
+          f"({CONTEXT_AWARE_CONFIG['min_violation_seconds']}s)")
+    print("   - Per-identity tracking with gap tolerance")
     
     def priority_aware_callback(results: List[Dict]):
         """Monitor system performance and fairness"""
