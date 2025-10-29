@@ -1422,6 +1422,36 @@ class AdaptiveWeightSimilarityEngine(EnhancedSimilarityEngine):
                     perf['false_negatives'] += 1
                 else:  # not method_prediction and not is_correct
                     perf['true_negatives'] += 1
+                        
+    # Add to AdaptiveWeightSimilarityEngine class
+    def compute_quality_adaptive_similarity(self, embedding: np.ndarray, 
+                                        centroids: Dict[str, np.ndarray],
+                                        quality_scores: Dict[str, float]) -> Dict[str, float]:
+        """Compute similarity with quality-based method selection"""
+        # Use quality scores to select appropriate methods
+        quality = quality_scores.get('overall', 0.5)
+        
+        if quality > 0.7:
+            # High quality - use precise methods
+            method_weights = {
+                'cosine': 0.35, 'angular': 0.25, 'pearson': 0.20,
+                'dot_product': 0.20, 'euclidean': 0.0, 'manhattan': 0.0
+            }
+        elif quality > 0.4:
+            # Medium quality - balanced approach
+            method_weights = {
+                'cosine': 0.25, 'angular': 0.25, 'pearson': 0.15,
+                'dot_product': 0.15, 'euclidean': 0.10, 'manhattan': 0.10
+            }
+        else:
+            # Low quality - robust methods
+            method_weights = {
+                'cosine': 0.15, 'angular': 0.20, 'pearson': 0.10,
+                'dot_product': 0.10, 'euclidean': 0.15, 'manhattan': 0.20,
+                'jaccard': 0.10
+            }
+        
+        return self.adaptive_weighted_similarity(embedding, centroids, method_weights)                    
 
     def calculate_method_performance(self, method_name: str) -> Dict[str, float]:
         """Calculate comprehensive performance metrics for a method"""
@@ -2472,10 +2502,10 @@ class RobustFaceRecognitionSystem(FaceRecognitionSystem):
             return None, 0.0, {}
         
         # Use quality-adaptive similarity engine
-        similarity_scores = self.similarity_engine.compute_quality_adaptive_similarity(
-            embedding, self.identity_centroids, quality_scores
+        similarity_scores = self.similarity_engine.adaptive_weighted_similarity(
+            embedding, self.identity_centroids
         )
-        
+
         # Compute adaptive threshold based on quality
         adaptive_threshold = self.threshold_manager.compute_adaptive_threshold(quality_scores)
         
@@ -4906,7 +4936,7 @@ class FairnessController:
 CONFIG = {
     'detection_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\yolov11n-face.pt',
     'mask_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\run_py\mask_detector112.onnx',  
-    'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\person_folder_2.json',
+    'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\person_folder_3.json',
     'detection_confidence': 0.6,
     'detection_iou': 0.6,
     'mask_detection_threshold': 0.85,  
@@ -5016,7 +5046,9 @@ def validate_config(config: Dict) -> bool:
 def main_priority_optimized():
     """Main function with priority-aware optimization"""
     # Create priority-aware system
-    face_system = RobustFaceRecognitionSystem(CONTEXT_AWARE_CONFIG)
+    config_manager = ConfigManager(CONFIG)
+    robust_config = config_manager.get_component_config('context_aware_processing')
+    face_system = RobustFaceRecognitionSystem(robust_config)
     processor = RealTimeProcessor(face_system=face_system) # , processing_interval=10
     
     # Add fairness controller
