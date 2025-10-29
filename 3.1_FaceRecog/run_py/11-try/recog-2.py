@@ -333,17 +333,23 @@ class DurationAwareAlertManager:
         self.last_alert_time = 0
         self.alert_lock = threading.Lock()
         
+        # 🆕 Retry configuration
+        self.max_retries = config.get('alert_max_retries', 3)
+        self.retry_delay = config.get('alert_retry_delay', 2)  # seconds
+        self.retry_timeout = config.get('alert_retry_timeout', 5)  # seconds per attempt
+        
         # 🆕 Duration tracking parameters
-        self.min_violation_frames = config.get('min_violation_frames', 20)  # 2 seconds at 10 FPS
+        self.min_violation_frames = config.get('min_violation_frames', 20)
         self.min_violation_seconds = config.get('min_violation_seconds', 2.0)
-        self.max_gap_frames = config.get('max_gap_frames', 5)  # Allow 5-frame gaps
+        self.max_gap_frames = config.get('max_gap_frames', 5)
         
         # 🆕 Violation duration tracking per identity
-        self.violation_timers = {}  # identity -> {'start_time': timestamp, 'frame_count': int, 'start_frame': int, 'continuous': bool}
-        self.alerted_identities = set()  # Track identities we've already alerted for
+        self.violation_timers = {}
+        self.alerted_identities = set()
         
         print(f"🔊 Duration-aware alerts: {self.min_violation_frames} frames / {self.min_violation_seconds}s threshold")
-
+        print(f"🔄 Retry configuration: {self.max_retries} attempts, {self.retry_delay}s delay")
+        
     def update_violation_duration(self, violations: List[Dict], current_frame_count: int):
         """Update violation duration tracking for each identity"""
         current_time = time.time()
@@ -436,7 +442,7 @@ class DurationAwareAlertManager:
         }
 
     def trigger_duration_alert(self, violations: List[Dict], current_frame_count: int) -> bool:
-        """Main method to check and trigger duration-based alerts"""
+        """Main method to check and trigger duration-based alerts - RETURN STATUS"""
         if not self.enabled or not self.server_url:
             return False
         
@@ -462,9 +468,9 @@ class DurationAwareAlertManager:
                 self.alerted_identities.add(identity)
                 duration_info = self.get_violation_duration_info(identity)
                 print(f"🚨 Duration alert triggered for {identity} "
-                      f"({duration_info['frames']} frames, {duration_info['seconds']:.1f}s)")
+                    f"({duration_info['frames']} frames, {duration_info['seconds']:.1f}s)")
         
-        return success
+        return success  # 🆕 Return whether alert was actually sent
 
     def _send_violation_alert(self, alert_identities: List[str], all_violations: List[Dict]) -> bool:
         """Send voice alert for violations that meet duration threshold"""
@@ -482,28 +488,28 @@ class DurationAwareAlertManager:
             # Alert for recognized people by name
             names = [v['identity'] for v in recognized]
             if len(names) == 1:
-                message = f"Perhatian, {names[0]} tidak memakai masker"
+                message = f"{names[0]} tidak memakai masker"
             else:
                 name_list = " dan ".join(names)
-                message = f"Perhatian, {name_list} tidak memakai masker"
+                message = f"{name_list} tidak memakai masker"
         else:
             # Alert for unknown people
             count = len(unknown)
             if count == 1:
-                message = "Perhatian, satu orang tidak dikenal tidak memakai masker"
+                message = "Satu orang tidak dikenal tidak memakai masker"
             else:
-                message = f"Perhatian, {count} orang tidak dikenal tidak memakai masker"
+                message = f"{count} orang tidak dikenal tidak memakai masker"
         
-        # Add duration information for the first identity
-        if alert_identities:
-            first_identity = alert_identities[0]
-            duration_info = self.get_violation_duration_info(first_identity)
-            message += f" selama {duration_info['seconds']:.1f} detik"
+        # # Add duration information for the first identity
+        # if alert_identities:
+        #     first_identity = alert_identities[0]
+        #     duration_info = self.get_violation_duration_info(first_identity)
+        #     message += f" selama {duration_info['seconds']:.1f} detik"
         
-        # Add urgency for multiple violations
-        total_violations = len(alert_violations)
-        if total_violations > 2:
-            message += ". Situasi darurat!"
+        # # Add urgency for multiple violations
+        # total_violations = len(alert_violations)
+        # if total_violations > 2:
+        #     message += ". Situasi darurat!"
         
         # Send the alert
         return self.send_voice_alert(message)
@@ -528,27 +534,90 @@ class DurationAwareAlertManager:
         )
         thread.start()
         return True
+            
+    def _log_audio_alert(self, message: str, status: str):
+        """Log audio alerts to CSV file with retry information"""
+        try:
+            if not hasattr(self, 'audio_logging_enabled') or not self.audio_logging_enabled:
+                return
+                
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            log_data = {
+                'timestamp': timestamp,
+                'alert_message': message,
+                'status': status,
+                'server_url': self.server_url,
+                'retry_config': f"{self.max_retries} attempts, {self.retry_delay}s delay"  # 🆕 Add retry info
+            }
+            
+            # Append to the main log file if available
+            if hasattr(self, 'log_file') and self.log_file:
+                with open(self.log_file, 'a', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([
+                        log_data['timestamp'],
+                        'AUDIO_ALERT',  # Special identifier for audio alerts
+                        log_data['alert_message'],
+                        log_data['status'],
+                        log_data['server_url'],
+                        log_data['retry_config']  # 🆕 Include retry info
+                    ])
+                    
+        except Exception as e:
+            print(f"❌ Failed to log audio alert: {e}") 
 
     def _send_alert_thread(self, message: str, identity: str, mask_status: str):
-        """Background thread for sending alerts"""
-        try:
-            # URL encode the message
-            encoded_message = quote(message)
-            alert_url = f"{self.server_url}?pesan={encoded_message}"
-            
-            # Send HTTP request with timeout
-            response = requests.get(alert_url, timeout=5)
-            
-            if response.status_code == 200:
-                print(f"🔊 Voice alert sent: {message}")
-            else:
-                print(f"❌ Alert server returned status: {response.status_code}")
+        """Background thread for sending alerts with RETRY LOGIC"""
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        for attempt in range(self.max_retries):
+            try:
+                # URL encode the message
+                encoded_message = quote(message)
+                alert_url = f"{self.server_url}?pesan={encoded_message}"
                 
-        except requests.exceptions.RequestException as e:
-            print(f"❌ Failed to send voice alert: {e}")
-        except Exception as e:
-            print(f"❌ Unexpected error in alert thread: {e}")
-
+                # 🆕 Log attempt with retry info
+                if attempt == 0:
+                    print(f"🎵 [{timestamp}] Sending voice alert: {message}")
+                else:
+                    print(f"🔄 [{timestamp}] Retry {attempt}/{self.max_retries}: {message}")
+                
+                # Send HTTP request with timeout
+                response = requests.get(alert_url, timeout=self.retry_timeout)
+                
+                if response.status_code == 200:
+                    print(f"🔊 [{timestamp}] Voice alert sent successfully")
+                    # 🆕 Log to CSV if audio logging is enabled
+                    if hasattr(self, 'audio_logging_enabled') and self.audio_logging_enabled:
+                        self._log_audio_alert(message, f"SUCCESS (attempt {attempt + 1})")
+                    return  # Success - exit retry loop
+                else:
+                    error_msg = f"HTTP {response.status_code}"
+                    print(f"❌ [{timestamp}] Attempt {attempt + 1} failed: {error_msg}")
+                    
+            except requests.exceptions.Timeout:
+                error_msg = "Request timeout"
+                print(f"⏰ [{timestamp}] Attempt {attempt + 1} failed: {error_msg}")
+            except requests.exceptions.ConnectionError:
+                error_msg = "Connection error"
+                print(f"🔌 [{timestamp}] Attempt {attempt + 1} failed: {error_msg}")
+            except requests.exceptions.RequestException as e:
+                error_msg = f"Request error: {e}"
+                print(f"❌ [{timestamp}] Attempt {attempt + 1} failed: {error_msg}")
+            except Exception as e:
+                error_msg = f"Unexpected error: {e}"
+                print(f"🚨 [{timestamp}] Attempt {attempt + 1} failed: {error_msg}")
+            
+            # 🆕 If not the last attempt, wait before retrying
+            if attempt < self.max_retries - 1:
+                print(f"⏳ [{timestamp}] Retrying in {self.retry_delay} seconds...")
+                time.sleep(self.retry_delay)
+        
+        # 🆕 If we get here, all attempts failed
+        final_error = f"All {self.max_retries} attempts failed"
+        print(f"🚨 [{timestamp}] {final_error} for alert: {message}")
+        if hasattr(self, 'audio_logging_enabled') and self.audio_logging_enabled:
+            self._log_audio_alert(message, f"FAILED: {final_error}")                
     def toggle_alerts(self):
         """Toggle voice alerts on/off"""
         self.enabled = not self.enabled
@@ -557,18 +626,20 @@ class DurationAwareAlertManager:
         return self.enabled
 
     def get_duration_stats(self) -> Dict:
-        """Get current duration tracking statistics"""
+        """Get current duration tracking statistics with real-time updates"""
         stats = {
             'total_tracked_identities': len(self.violation_timers),
             'alerted_identities': list(self.alerted_identities),
             'violation_timers': {}
         }
         
+        current_time = time.time()
         for identity, timer in self.violation_timers.items():
             stats['violation_timers'][identity] = {
                 'frame_count': timer['frame_count'],
-                'duration_seconds': time.time() - timer['start_time'],
-                'continuous': timer.get('continuous', True)
+                'duration_seconds': current_time - timer['start_time'],  # 🆕 Real-time duration
+                'continuous': timer.get('continuous', True),
+                'last_frame': timer['last_frame']
             }
         
         return stats
@@ -2813,6 +2884,7 @@ class RealTimeProcessor:
 
         # Enhanced logging system
         self.logging_enabled = False
+        self.audio_logging_enabled = False
         self.log_file = None
         self.log_start_time = None
         self.log_interval = 5 
@@ -2882,7 +2954,7 @@ class RealTimeProcessor:
                 import psutil
                 process = psutil.Process()
                 memory_mb = process.memory_info().rss / 1024 / 1024
-                if memory_mb > 1000:  # 1GB threshold
+                if memory_mb > 1050:  # 1050 MB threshold
                     print(f"⚠️ High memory usage: {memory_mb:.1f}MB - performing cleanup")
                     self.perform_memory_cleanup()
             except ImportError:
@@ -3001,10 +3073,10 @@ class RealTimeProcessor:
             int(y2 * scale_y)
         ]        
         
-    def check_and_send_alerts(self, results: List[Dict]):
-        """Enhanced alert checking with duration thresholds"""
+    def check_and_send_alerts(self, results: List[Dict]) -> Dict:
+        """Enhanced alert checking with detailed tracking information"""
         if not self.alert_manager.enabled:
-            return
+            return {}
             
         # Detect current violations
         current_violations = []
@@ -3018,13 +3090,32 @@ class RealTimeProcessor:
                     'bbox': result['bbox']
                 })
         
-        # Use duration-aware alerting
-        self.alert_manager.trigger_duration_alert(current_violations, self.frame_count)
+        # Use duration-aware alerting and get detailed results
+        alert_triggered = self.alert_manager.trigger_duration_alert(current_violations, self.frame_count)
         
-        # 🆕 Optional: Print duration tracking debug info
-        if self.config.get('verbose_duration_tracking', False) and current_violations:
-            self._print_duration_debug(current_violations)
-            
+        # 🆕 Return detailed alert activity information
+        alert_results = {
+            'triggered_alerts': current_violations if alert_triggered else [],
+            'cooldown_skipped': self._get_cooldown_identities(current_violations),
+            'duration_tracking': self.alert_manager.get_duration_stats().get('violation_timers', {}),
+            'alert_sent': alert_triggered
+        }
+        
+        return alert_results
+        
+    def _get_cooldown_identities(self, violations: List[Dict]) -> List[str]:
+        """Get identities that are in cooldown and skipped for alerts"""
+        cooldown_identities = []
+        current_time = time.time()
+        
+        for violation in violations:
+            identity = violation.get('identity', 'Unknown')
+            # Check if this identity was recently alerted
+            if identity in self.alert_manager.alerted_identities:
+                cooldown_identities.append(identity)
+        
+        return cooldown_identities    
+         
     def _print_duration_debug(self, violations: List[Dict]):
         """Print duration tracking debug information"""
         for violation in violations[:2]:  # Only first 2 to avoid spam
@@ -3724,15 +3815,21 @@ class RealTimeProcessor:
         if not self.logging_enabled:
             # Enable both CSV and image logging
             self.setup_logging(filename)
-            self.setup_image_logging(self.log_file)  # Use same base filename
+            self.setup_image_logging(self.log_file)
             self.logging_enabled = True
             self.image_logging_enabled = True
             self.log_counter = 0
             self.saved_image_count = 0
+            
+            # 🆕 Enable audio alert logging
+            self.audio_logging_enabled = True
             print("🟢 Enhanced logging STARTED")
             print("   - CSV: timestamp, identity, mask_status")
             print("   - Images: jpeg frames for mask violations")
+            print("   - Audio: voice alert logging with retry")
+            print(f"   - Retry: {self.alert_manager.max_retries} attempts")
             print(f"   - Image folder: {self.image_log_folder}")
+            
         else:
             # Disable both
             if self.log_file:
@@ -3742,11 +3839,14 @@ class RealTimeProcessor:
                 print(f"   - CSV entries: {self.log_counter}")
                 print(f"   - Violation images: {self.saved_image_count}")
             
+            # 🆕 Disable audio alert logging
+            self.audio_logging_enabled = False
             self.logging_enabled = False
             self.image_logging_enabled = False
             self.log_file = None
             self.image_log_folder = None
             self.log_start_time = None
+                            
                                      
     def collect_log_data(self, results: List[Dict]) -> List[Dict]:
         """Collect individual face recognition and mask status data - FIXED"""
@@ -3803,30 +3903,37 @@ class RealTimeProcessor:
             print(f"❌ Log write error: {e}")
                                         
     def setup_logging(self, filename: str = None):
-        """Setup CSV logging with face names and mask status - FIXED"""
+        """Setup CSV logging with face names, mask status, and audio alerts"""
         try:
             if filename is None:
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")  # FIXED: datetime.datetime
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"face_recognition_detailed_{timestamp}.csv"
             
             self.log_file = filename
-            self.log_start_time = datetime.datetime.now()  # FIXED: datetime.datetime
+            self.log_start_time = datetime.datetime.now()
             
-            # Write simplified header
+            # 🆕 Enhanced header with audio alert support
+            enhanced_columns = [
+                'timestamp', 
+                'identity', 
+                'mask_status',
+                'alert_type',    # 🆕 New column
+                'alert_status'   # 🆕 New column
+            ]
+            
             with open(self.log_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                writer.writerow(self.log_columns)
+                writer.writerow(enhanced_columns)
             
-            print(f"📊 Detailed face logging ENABLED: {filename}")
-            print(f"   - Columns: {self.log_columns}")
-            print(f"   - Logging: Recognized faces with mask status")
-            print(f"   - Interval: Every {self.log_interval} processed frames")
+            print(f"📊 Enhanced logging ENABLED: {filename}")
+            print(f"   - Columns: {enhanced_columns}")
+            print(f"   - Logging: Recognized faces + mask status + audio alerts")
             
         except Exception as e:
             print(f"❌ Failed to setup logging: {e}")
             self.logging_enabled = False
-            self.log_file = None                                  
-
+            self.log_file = None
+            
     def take_annotated_snapshot(self, frame: np.ndarray):
         """Take snapshot with overlay information"""
         timestamp = int(time.time())
@@ -4513,9 +4620,9 @@ class RealTimeProcessor:
                 print("🎯 ALL CONDITIONS MET - Image should be saved!")
             else:
                 print("⏰ Some conditions not met for image saving")
-                    
+                            
     def log_performance_data(self, results: List[Dict], display_frame: np.ndarray = None, original_frame: np.ndarray = None):
-        """Enhanced logging with voice alerts"""
+        """Enhanced logging with voice alerts and retry tracking"""
         if not self.logging_enabled:
             return
         
@@ -4526,8 +4633,36 @@ class RealTimeProcessor:
         print(f"\n=== LOGGING DEBUG Frame {self.processing_count} ===")
         self.debug_logging_flow(results)
         
-        # 🆕 CHECK FOR MASK VIOLATIONS AND SEND ALERTS
-        self.check_and_send_alerts(results)
+        # 🆕 ENHANCED: CHECK FOR MASK VIOLATIONS AND SEND ALERTS WITH DETAILED LOGGING
+        alert_results = self.check_and_send_alerts(results)
+        
+        # 🆕 LOG ALERT ACTIVITY
+        if alert_results:
+            print(f"🎯 ALERT ACTIVITY SUMMARY:")
+            print(f"   - Triggered alerts: {len(alert_results['triggered_alerts'])}")
+            print(f"   - Cooldown skipped: {len(alert_results['cooldown_skipped'])}")
+            print(f"   - Duration tracking: {len(alert_results['duration_tracking'])} identities")
+            
+            # Show detailed alert information
+            for alert in alert_results['triggered_alerts']:
+                identity = alert.get('identity', 'Unknown')
+                duration_info = self.alert_manager.get_violation_duration_info(identity)
+                print(f"   🔊 ALERTING: {identity} - {duration_info['frames']} frames, {duration_info['seconds']:.1f}s")
+                
+            # Show identities in cooldown
+            if alert_results['cooldown_skipped']:
+                print(f"   ⏰ COOLDOWN: {len(alert_results['cooldown_skipped'])} identities waiting")
+                for identity in list(alert_results['cooldown_skipped'])[:3]:  # Show first 3
+                    print(f"      - {identity}")
+                    
+            # Show duration tracking status
+            if alert_results['duration_tracking']:
+                print(f"   📊 DURATION TRACKING:")
+                for identity, timer in list(alert_results['duration_tracking'].items())[:3]:  # Show first 3
+                    status = "ALERTED" if identity in self.alert_manager.alerted_identities else "TRACKING"
+                    print(f"      - {identity}: {timer['frame_count']} frames, {timer['duration_seconds']:.1f}s - {status}")
+        else:
+            print(f"🎯 ALERT ACTIVITY: No alerts triggered this cycle")
         
         try:
             # CSV logging: Write entries for recognized faces
@@ -4573,8 +4708,7 @@ class RealTimeProcessor:
             print("=== END DEBUG ===\n")
                     
         except Exception as e:
-            print(f"❌ Enhanced logging error: {e}")
-                                                       
+            print(f"❌ Enhanced logging error: {e}")                                                               
     def run(self, source: str = "0"):
         """Main loop with memory management"""
         try:
@@ -4783,7 +4917,7 @@ class RealTimeProcessor:
         print(f"  Server: {self.config.get('alert_server_url', 'Not configured')}")
         
         print("\n📊 ENHANCED LOGGING SYSTEM:")
-        print("  'l' - Toggle CSV + Image logging (mask violations)")
+        print("  'l' - Toggle CSV + Image + Audio logging")
         print("  ';' - Change log interval (1-10 frames)")
         print("  ':' - Print current log status")
         print("  Features:")
@@ -5005,8 +5139,8 @@ CONFIG = {
     'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\person_folder_3.json',
     'detection_confidence': 0.6,
     'detection_iou': 0.6,
-    'mask_detection_threshold': 0.85,  
-    'roi_padding': 40,  
+    'mask_detection_threshold': 0.95,  
+    'roi_padding': 20,  
     'embedding_model': 'Facenet',
     'recognition_threshold': 0.6,  
     'max_faces_per_frame': 10,
@@ -5015,15 +5149,20 @@ CONFIG = {
     'tracking_max_age': 100,
     
     # 🆕 Duration threshold settings
-    'min_violation_frames': 20,      # 2 seconds at 10 FPS
-    'min_violation_seconds': 2.0,    # Minimum 2 seconds continuous violation
+    'min_violation_frames': 5,      # . seconds at 10 FPS
+    'min_violation_seconds': 0.5,    # Minimum . seconds continuous violation
     'max_gap_frames': 5,             # Allow 5-frame gaps in tracking
     'verbose_duration_tracking': True,  # Print debug info
     
-    # Existing alert settings
-    'alert_server_url': 'https://your-domain.my.id/actions/a_notifikasi_suara_speaker.php',
-    'alert_cooldown_seconds': 120,
+    # 🆕 Enhanced alert settings with retry configuration
+    'alert_server_url': 'https://vps.scasda.my.id/actions/a_notifikasi_suara_speaker.php',
+    'alert_cooldown_seconds': 5,
     'enable_voice_alerts': True,
+    
+    # 🆕 Retry configuration
+    'alert_max_retries': 3,           # Number of retry attempts
+    'alert_retry_delay': 2,           # Seconds between retries
+    'alert_retry_timeout': 5,         # Timeout per attempt in seconds
 }
 
 # ENHANCED CONFIG WITH SIMILARITY SETTINGS
