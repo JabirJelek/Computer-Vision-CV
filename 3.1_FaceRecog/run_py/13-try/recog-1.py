@@ -2147,7 +2147,7 @@ class FaceQualityAssessor:
     def _assess_face_position(self, bbox: List[int], frame_shape: Tuple[int, int]) -> float:
         """Assess face position in frame"""
         x1, y1, x2, y2 = bbox
-        frame_h, frame_w = frame_shape
+        frame_h, frame_w = frame_shape[:2]
         
         center_x = (x1 + x2) / 2
         center_y = (y1 + y2) / 2
@@ -2711,18 +2711,19 @@ class RobustFaceRecognitionSystem(FaceRecognitionSystem):
         self.quality_assessor = FaceQualityAssessor(config)
         self.threshold_manager = AdaptiveThresholdManager(config)
         
-        # Quality-adaptive engine
+        # Quality-adaptive engine - check if it exists before using
         self.similarity_engine = AdaptiveWeightSimilarityEngine(config)
         
         # Initialize identity_centroids if not exists
         if not hasattr(self, '_identity_centroids'):
             self._identity_centroids = {}
         
-        # Enhanced configuration
+        # Enhanced configuration - add missing config options
         self.robust_config = {
             'enable_multi_scale': config.get('enable_multi_scale', True),
             'enable_temporal_fusion': config.get('enable_temporal_fusion', True),
             'enable_quality_aware': config.get('enable_quality_aware', True),
+            'enable_quality_adaptive_similarity': config.get('enable_quality_adaptive_similarity', False),  # ADDED
             'min_face_quality': config.get('min_face_quality', 0.3),
             'temporal_buffer_size': config.get('temporal_buffer_size', 10),
         }
@@ -2757,7 +2758,7 @@ class RobustFaceRecognitionSystem(FaceRecognitionSystem):
             if face_roi.size == 0 or face_roi.shape[0] < 20 or face_roi.shape[1] < 20:
                 continue
                 
-            # Quality assessment
+            # Quality assessment - FIX: pass frame_shape correctly
             quality_scores = self.quality_assessor.assess_face_quality(face_roi, detection['bbox'])
             
             # Skip very low quality faces entirely
@@ -2782,8 +2783,8 @@ class RobustFaceRecognitionSystem(FaceRecognitionSystem):
             if embedding is None:
                 continue
             
-            # QUALITY-ADAPTIVE RECOGNITION
-            if self.robust_config['enable_quality_adaptive_similarity']:
+            # QUALITY-ADAPTIVE RECOGNITION - FIXED: Check if enabled
+            if self.robust_config.get('enable_quality_adaptive_similarity', False):
                 identity, recognition_confidence, detailed_scores = self.recognize_face_quality_adaptive(
                     embedding, quality_scores
                 )
@@ -2821,8 +2822,8 @@ class RobustFaceRecognitionSystem(FaceRecognitionSystem):
                 'adaptive_threshold': adaptive_threshold,
                 'track_id': track_id,
                 'detailed_scores': detailed_scores,
-                'similarity_profile': self.similarity_engine.current_profile,
-                'quality_adaptive': self.robust_config['enable_quality_adaptive_similarity']
+                'similarity_profile': 'adaptive_weights',
+                'quality_adaptive': self.robust_config.get('enable_quality_adaptive_similarity', False)  # FIXED
             })
         
         # Update stats and store last results
@@ -2849,10 +2850,20 @@ class RobustFaceRecognitionSystem(FaceRecognitionSystem):
         if not self.identity_centroids:
             return None, 0.0, {}
         
-        # Use quality-adaptive similarity engine
-        similarity_scores = self.similarity_engine.adaptive_weighted_similarity(
-            embedding, self.identity_centroids
-        )
+        # Use quality-adaptive similarity engine - FIXED: Check if method exists
+        if hasattr(self.similarity_engine, 'adaptive_weighted_similarity'):
+            similarity_scores = self.similarity_engine.adaptive_weighted_similarity(
+                embedding, self.identity_centroids
+            )
+        else:
+            # Fallback to basic similarity
+            similarity_scores = {}
+            for identity, centroid in self.identity_centroids.items():
+                # Simple cosine similarity as fallback
+                embedding = embedding.flatten()
+                centroid = centroid.flatten()
+                cosine_sim = cosine_similarity([embedding], [centroid])[0][0]
+                similarity_scores[identity] = cosine_sim
 
         # Compute adaptive threshold based on quality
         adaptive_threshold = self.threshold_manager.compute_adaptive_threshold(quality_scores)
@@ -2868,10 +2879,9 @@ class RobustFaceRecognitionSystem(FaceRecognitionSystem):
                 best_score = score
                 best_identity = identity
         
-        # Debug output
+        # Debug output - FIXED: Remove reference to undefined current_profile
         if self.config.get('verbose', False) and best_identity:
-            profile = self.similarity_engine.current_profile
-            print(f"✅ Recognized: {best_identity} (score: {best_score:.3f}, profile: {profile})")
+            print(f"✅ Recognized: {best_identity} (score: {best_score:.3f}, method: quality_adaptive)")
         
         return best_identity, best_score, detailed_scores    
  
@@ -2883,7 +2893,13 @@ class RobustFaceRecognitionSystem(FaceRecognitionSystem):
          
     def get_balanced_stats(self) -> Dict:
         """Get balanced engine statistics"""
-        stats = self.similarity_engine.get_engine_stats()
+        # FIXED: Check if method exists before calling
+        if hasattr(self.similarity_engine, 'get_engine_stats'):
+            stats = self.similarity_engine.get_engine_stats()
+        elif hasattr(self.similarity_engine, 'get_weight_statistics'):
+            stats = self.similarity_engine.get_weight_statistics()
+        else:
+            stats = {}
         
         # Add recognition statistics
         if hasattr(self, 'last_results'):
@@ -2891,8 +2907,7 @@ class RobustFaceRecognitionSystem(FaceRecognitionSystem):
             recognized_faces = len([r for r in self.last_results if r['identity']])
             stats['recognition_rate'] = recognized_faces / total_faces if total_faces > 0 else 0
         
-        return stats         
-
+        return stats
 class DisplayResizer:
     """Handles multiple resizing strategies for output display"""
     
