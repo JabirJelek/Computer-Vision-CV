@@ -1,0 +1,19 @@
+new_pipeline/
+├── core/
+│   ├── __init__.py
+│   ├── config_manager.py
+│   ├── base_processor.py
+│   └── pipeline_orchestrator.py
+├── components/
+│   ├── detection/
+│   ├── recognition/
+│   ├── analysis/
+│   └── output/
+├── interfaces/
+│   ├── processor.py
+│   └── analyzer.py
+└── utils/
+    ├── logging.py
+    └── helpers.py
+
+    

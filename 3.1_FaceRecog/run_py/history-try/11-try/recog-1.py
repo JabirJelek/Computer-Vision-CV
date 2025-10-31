@@ -5098,7 +5098,7 @@ def select_source():
     """Interactive source selection"""
     sources = {
         '1': '0',  # Default camera
-        '2': 'rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/101',
+        '2': 'rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/601',
         '3': 'http://192.168.1.101:8080/video',
         '4': 'video.mp4'
     }

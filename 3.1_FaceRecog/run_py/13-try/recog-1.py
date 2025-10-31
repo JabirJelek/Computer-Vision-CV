@@ -2486,41 +2486,69 @@ class FaceRecognitionSystem:
             return []
             
     def extract_embedding(self, face_roi: np.ndarray) -> Optional[np.ndarray]:
-        """Optimized embedding extraction with better error handling"""
+        """Enhanced embedding extraction with comprehensive validation"""
         start_time = time.time()
         
-        # Validate ROI dimensions more thoroughly
-        if (face_roi.size == 0 or face_roi.shape[0] < 50 or face_roi.shape[1] < 50 or 
-            np.max(face_roi) - np.min(face_roi) < 10):  # Check for low contrast
+        # Comprehensive ROI validation
+        if (face_roi is None or face_roi.size == 0 or 
+            face_roi.shape[0] < 40 or face_roi.shape[1] < 40):
+            if self.config.get('verbose', False):
+                print("❌ Embedding skipped: Invalid ROI dimensions")
+            return None
+        
+        # Check for sufficient contrast
+        if len(face_roi.shape) == 3:
+            gray = cv2.cvtColor(face_roi, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = face_roi
+            
+        contrast = np.std(gray)
+        if contrast < 15:  # Too low contrast
+            if self.config.get('verbose', False):
+                print(f"❌ Embedding skipped: Low contrast ({contrast:.1f})")
             return None
             
         try:
-            # Convert to RGB and ensure proper data type
+            # Convert to RGB and normalize
             if len(face_roi.shape) == 3:
                 face_rgb = cv2.cvtColor(face_roi, cv2.COLOR_BGR2RGB)
             else:
                 face_rgb = cv2.cvtColor(face_roi, cv2.COLOR_GRAY2RGB)
             
-            # Normalize pixel values
+            # Ensure proper data type and range
             face_rgb = face_rgb.astype(np.float32) / 255.0
             
+            # Extract embedding with timeout protection
             embedding_obj = DeepFace.represent(
                 face_rgb,
                 model_name=self.config['embedding_model'],
                 enforce_detection=False,
                 detector_backend='skip',
-                align=True  # Add face alignment for better accuracy
+                align=True
             )
             
             if embedding_obj and len(embedding_obj) > 0:
                 embedding_time = (time.time() - start_time) * 1000
                 self.debug_stats['embedding_times'].append(embedding_time)
-               
-                return np.array(embedding_obj[0]['embedding'])
+                
+                embedding_array = np.array(embedding_obj[0]['embedding'])
+                
+                # Validate embedding quality
+                if (np.any(np.isnan(embedding_array)) or 
+                    np.any(np.isinf(embedding_array)) or
+                    np.linalg.norm(embedding_array) < 0.001):
+                    if self.config.get('verbose', False):
+                        print("❌ Embedding rejected: Poor quality")
+                    return None
+                    
+                if self.config.get('verbose', False):
+                    print(f"✅ Embedding extracted: {embedding_array.shape}, norm: {np.linalg.norm(embedding_array):.3f}")
+                    
+                return embedding_array
                 
         except Exception as e:
             if self.config.get('verbose', False):
-                print(f"Embedding extraction error: {e}")
+                print(f"❌ Embedding extraction failed: {e}")
                 
         return None
 
@@ -3304,21 +3332,39 @@ class RealTimeProcessor:
 
     def scale_bbox_to_original(self, bbox: List[int], original_shape: Tuple[int, int], 
                             processed_shape: Tuple[int, int]) -> List[int]:
-        """Scale bounding box coordinates from processed frame back to original frame"""
-        x1, y1, x2, y2 = bbox
-        orig_h, orig_w = original_shape
-        proc_h, proc_w = processed_shape
+        """Enhanced coordinate scaling with bounds checking"""
+        try:
+            x1, y1, x2, y2 = bbox
+            orig_h, orig_w = original_shape
+            proc_h, proc_w = processed_shape
+            
+            # Validate dimensions
+            if proc_w == 0 or proc_h == 0:
+                return bbox
+                
+            scale_x = orig_w / proc_w
+            scale_y = orig_h / proc_h
+            
+            # Scale coordinates
+            scaled_bbox = [
+                max(0, int(x1 * scale_x)),
+                max(0, int(y1 * scale_y)),
+                min(orig_w, int(x2 * scale_x)),
+                min(orig_h, int(y2 * scale_y))
+            ]
+            
+            # Validate scaled bbox
+            x1_s, y1_s, x2_s, y2_s = scaled_bbox
+            if x2_s <= x1_s or y2_s <= y1_s:
+                print(f"⚠️ Invalid scaled bbox: {scaled_bbox}, returning original")
+                return bbox
+                
+            return scaled_bbox
+            
+        except Exception as e:
+            print(f"❌ Bbox scaling error: {e}")
+            return bbox  # Fallback to original
         
-        scale_x = orig_w / proc_w
-        scale_y = orig_h / proc_h
-        
-        return [
-            int(x1 * scale_x),
-            int(y1 * scale_y),
-            int(x2 * scale_x),
-            int(y2 * scale_y)
-        ]
-
     def _prepare_display_results(self, results: List[Dict], original_frame: np.ndarray, 
                             display_frame: np.ndarray) -> List[Dict]:
         """Scale results to display coordinates"""
@@ -4031,20 +4077,21 @@ class RealTimeProcessor:
         return False
 
     def should_process_frame(self) -> bool:
-        """Adaptive frame processing based on system load"""
+        """Enhanced frame processing decision with timing protection"""
         current_time = time.time()
         
         # Base interval check
         if self.frame_count % self.processing_interval != 0:
             return False
         
-        # Timing protection
-        if current_time - self.last_processed_time < self.min_processing_delay:
+        # Timing protection - prevent too frequent processing
+        time_since_last = current_time - self.last_processed_time
+        if time_since_last < self.min_processing_delay:
             return False
         
-        # Adaptive interval based on FPS
+        # Adaptive interval based on system load
         if self.fps < 10:  # Low FPS - process fewer frames
-            adaptive_interval = max(1, self.processing_interval + 2)
+            adaptive_interval = max(2, self.processing_interval + 3)
             if self.frame_count % adaptive_interval != 0:
                 return False
         elif self.fps > 30:  # High FPS - can process more frames
@@ -4052,8 +4099,13 @@ class RealTimeProcessor:
             if self.frame_count % adaptive_interval != 0:
                 return False
         
+        # Queue health check
+        if self.frame_queue.qsize() > 3:  # Queue backing up
+            return False
+        
         self.last_processed_time = current_time
         return True
+
         
     def calculate_fps(self):
         """Calculate and update FPS"""
@@ -5006,15 +5058,12 @@ class RealTimeProcessor:
             print(f"❌ Enhanced logging error: {e}") 
                                                                           
     def run(self, source: str = "0"):
-        """Main loop with auto-enrollment fixes"""
+        """Main loop with FIXED video processing flow"""
         try:
             self.initialize_stream(source)
             self.start_frame_capture()
             
-            print("🎮 Starting with AUTO-ENROLLMENT SYSTEM")
-            print(f"   - Min frames: {self.config.get('auto_enroll_min_frames', 30)}")
-            print(f"   - Min confidence: {self.config.get('auto_enroll_min_confidence', 0.6)}")
-            print(f"   - Max per session: {self.config.get('max_auto_enroll_per_session', 10)}")
+            print("🎮 Starting with FIXED video processing flow")
             
             last_results = []
             last_performance = {}
@@ -5023,13 +5072,13 @@ class RealTimeProcessor:
                 # System health monitoring
                 self.monitor_system_health()
                 
-                # Use stable frame acquisition
+                # Get frame using stable acquisition
                 original_frame = self.get_frame_for_processing()
                 if original_frame is None:
                     time.sleep(0.03)
                     continue
                 
-                # Skip frames if queue is backing up
+                # Skip if queue is backing up
                 if self.frame_queue.qsize() > 2:
                     continue
                 
@@ -5040,87 +5089,96 @@ class RealTimeProcessor:
                 self.calculate_fps()
                 self.update_dynamic_system()
                 
-                # Store original frame size
+                # Store original frame size FIRST
                 original_h, original_w = original_frame.shape[:2]
                 
-                # Resize for processing using dynamic scale
+                # 🔄 FIX: Consistent processing path
                 processing_frame = self.enhanced_resize_for_processing(original_frame)
                 processed_h, processed_w = processing_frame.shape[:2]
                 
-                # Resize for display
+                # Create display frame from ORIGINAL (not processing frame)
                 display_frame = self.resize_frame_for_display(original_frame)
                 
                 should_process = self.should_process_frame()
+                current_results = []
                 
                 if should_process:
-                    # Process frame and get results - FIX: Use robust processing
-                    if hasattr(self.face_system, 'process_frame_robust'):
-                        raw_results = self.face_system.process_frame_robust(processing_frame)
-                    else:
-                        raw_results = self.face_system.process_frame(processing_frame)
+                    try:
+                        # 🎯 FIX: Process on the CORRECT frame
+                        if hasattr(self.face_system, 'process_frame_robust'):
+                            raw_results = self.face_system.process_frame_robust(processing_frame)
+                        else:
+                            raw_results = self.face_system.process_frame(processing_frame)
                         
-                    processing_results = self.face_tracker.update(raw_results, self.frame_count)
-                    
-                    # Scale bounding boxes back to original frame
-                    scaled_results = []
-                    for result in processing_results:
-                        scaled_bbox = self.scale_bbox_to_original(
-                            result['bbox'], 
-                            (original_h, original_w), 
-                            (processed_h, processed_w)
+                        # Update face tracking
+                        processing_results = self.face_tracker.update(raw_results, self.frame_count)
+                        
+                        # 🎯 FIX: Proper coordinate scaling
+                        scaled_results = []
+                        for result in processing_results:
+                            # Scale from processing frame back to original frame coordinates
+                            scaled_bbox = self.scale_bbox_to_original(
+                                result['bbox'], 
+                                (original_h, original_w), 
+                                (processed_h, processed_w)
+                            )
+                            scaled_result = result.copy()
+                            scaled_result['bbox'] = scaled_bbox
+                            scaled_results.append(scaled_result)
+                        
+                        # 🆕 AUTO-ENROLLMENT: Track and enroll unknown faces
+                        current_unknowns = self.unknown_enroller.update_unknown_faces(
+                            scaled_results, self.frame_count
                         )
-                        scaled_result = result.copy()
-                        scaled_result['bbox'] = scaled_bbox
-                        scaled_results.append(scaled_result)
-
-                    # 🆕 AUTO-ENROLLMENT: Track and enroll unknown faces
-                    current_unknowns = self.unknown_enroller.update_unknown_faces(
-                        scaled_results, self.frame_count
-                    )
-                    
-                    # Check for auto-enrollment (pass original_frame for image saving)
-                    enrolled_count = self.unknown_enroller.check_and_enroll_unknown_faces(
-                        self.frame_count, original_frame
-                    )
-                    
-                    if enrolled_count > 0:
-                        print(f"🎉 Auto-enrolled {enrolled_count} new face(s)!")
-                        # Update enrollment stats display
-                        enroll_stats = self.unknown_enroller.get_stats()
-                        print(f"   - Total auto-enrolled: {enroll_stats['auto_enrolled_count']}")
-                        print(f"   - Still tracking: {enroll_stats['currently_tracking']} unknown faces")
-
-                    # Enhanced logging with image support
-                    self.log_performance_data(scaled_results, display_frame, original_frame)
-                    
-                    last_results = scaled_results
-                    self.processing_count += 1
-                    
-                    # Dynamic adjustment
-                    if self.dynamic_adjustment_enabled and self.frame_count % self.adaptive_check_interval == 0:
-                        performance = self.analyze_detection_performance(scaled_results, (original_h, original_w))
-                        self.performance_history.append(performance)
-                        last_performance = performance
-                        self.apply_dynamic_adjustment(performance)
+                        
+                        # Check for auto-enrollment
+                        enrolled_count = self.unknown_enroller.check_and_enroll_unknown_faces(
+                            self.frame_count, original_frame
+                        )
+                        
+                        if enrolled_count > 0:
+                            print(f"🎉 Auto-enrolled {enrolled_count} new face(s)!")
+                        
+                        # Enhanced logging
+                        self.log_performance_data(scaled_results, display_frame, original_frame)
+                        
+                        current_results = scaled_results
+                        last_results = scaled_results
+                        self.processing_count += 1
+                        
+                        # Dynamic adjustment
+                        if self.dynamic_adjustment_enabled and self.frame_count % self.adaptive_check_interval == 0:
+                            performance = self.analyze_detection_performance(current_results, (original_h, original_w))
+                            self.performance_history.append(performance)
+                            last_performance = performance
+                            self.apply_dynamic_adjustment(performance)
+                            
+                    except Exception as e:
+                        print(f"❌ Processing error: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        current_results = []
                 
-                # Use cached results if not processing this frame
-                display_results = self._prepare_display_results(last_results, original_frame, display_frame)
+                # 🎯 FIX: Always prepare display results from current frame
+                display_results = self._prepare_display_results(current_results, original_frame, display_frame)
                 
-                # Enhanced drawing
+                # Enhanced drawing on display frame
                 self.draw_enhanced_results(display_frame, display_results, last_performance)
+                
+                # Show the display frame
                 cv2.imshow('Dynamic Face Recognition System', display_frame)
                 
                 # Handle key controls
                 key = cv2.waitKey(1) & 0xFF
                 self.handle_key_controls(key, display_frame)
-                            
+                                
         except Exception as e:
             print(f"❌ Error in main loop: {e}")
             import traceback
             traceback.print_exc()
         finally:
             self.stop()
-            
+                    
     def toggle_auto_enrollment(self):
         """Toggle auto-enrollment feature"""
         current = self.face_system.config.get('enable_auto_enrollment', True)
