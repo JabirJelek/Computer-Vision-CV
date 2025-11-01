@@ -29,6 +29,10 @@ import numpy as np
 from collections import deque
 from typing import Dict, List, Tuple, Optional
 
+from voyager import Index, Space
+
+
+    
 class ConfigManager:
     """Unified configuration manager for hierarchical configuration management"""
     
@@ -333,23 +337,17 @@ class DurationAwareAlertManager:
         self.last_alert_time = 0
         self.alert_lock = threading.Lock()
         
-        # 🆕 Retry configuration
-        self.max_retries = config.get('alert_max_retries', 3)
-        self.retry_delay = config.get('alert_retry_delay', 2)  # seconds
-        self.retry_timeout = config.get('alert_retry_timeout', 5)  # seconds per attempt
-        
         # 🆕 Duration tracking parameters
-        self.min_violation_frames = config.get('min_violation_frames', 20)
+        self.min_violation_frames = config.get('min_violation_frames', 20)  # 2 seconds at 10 FPS
         self.min_violation_seconds = config.get('min_violation_seconds', 2.0)
-        self.max_gap_frames = config.get('max_gap_frames', 5)
+        self.max_gap_frames = config.get('max_gap_frames', 5)  # Allow 5-frame gaps
         
         # 🆕 Violation duration tracking per identity
-        self.violation_timers = {}
-        self.alerted_identities = set()
+        self.violation_timers = {}  # identity -> {'start_time': timestamp, 'frame_count': int, 'start_frame': int, 'continuous': bool}
+        self.alerted_identities = set()  # Track identities we've already alerted for
         
         print(f"🔊 Duration-aware alerts: {self.min_violation_frames} frames / {self.min_violation_seconds}s threshold")
-        print(f"🔄 Retry configuration: {self.max_retries} attempts, {self.retry_delay}s delay")
-        
+
     def update_violation_duration(self, violations: List[Dict], current_frame_count: int):
         """Update violation duration tracking for each identity"""
         current_time = time.time()
@@ -442,7 +440,7 @@ class DurationAwareAlertManager:
         }
 
     def trigger_duration_alert(self, violations: List[Dict], current_frame_count: int) -> bool:
-        """Main method to check and trigger duration-based alerts - RETURN STATUS"""
+        """Main method to check and trigger duration-based alerts"""
         if not self.enabled or not self.server_url:
             return False
         
@@ -468,9 +466,9 @@ class DurationAwareAlertManager:
                 self.alerted_identities.add(identity)
                 duration_info = self.get_violation_duration_info(identity)
                 print(f"🚨 Duration alert triggered for {identity} "
-                    f"({duration_info['frames']} frames, {duration_info['seconds']:.1f}s)")
+                      f"({duration_info['frames']} frames, {duration_info['seconds']:.1f}s)")
         
-        return success  # 🆕 Return whether alert was actually sent
+        return success
 
     def _send_violation_alert(self, alert_identities: List[str], all_violations: List[Dict]) -> bool:
         """Send voice alert for violations that meet duration threshold"""
@@ -488,28 +486,28 @@ class DurationAwareAlertManager:
             # Alert for recognized people by name
             names = [v['identity'] for v in recognized]
             if len(names) == 1:
-                message = f"{names[0]} tidak memakai masker"
+                message = f"Perhatian, {names[0]} tidak memakai masker"
             else:
                 name_list = " dan ".join(names)
-                message = f"{name_list} tidak memakai masker"
+                message = f"Perhatian, {name_list} tidak memakai masker"
         else:
             # Alert for unknown people
             count = len(unknown)
             if count == 1:
-                message = "Satu orang tidak dikenal tidak memakai masker"
+                message = "Perhatian, satu orang tidak dikenal tidak memakai masker"
             else:
-                message = f"{count} orang tidak dikenal tidak memakai masker"
+                message = f"Perhatian, {count} orang tidak dikenal tidak memakai masker"
         
-        # # Add duration information for the first identity
-        # if alert_identities:
-        #     first_identity = alert_identities[0]
-        #     duration_info = self.get_violation_duration_info(first_identity)
-        #     message += f" selama {duration_info['seconds']:.1f} detik"
+        # Add duration information for the first identity
+        if alert_identities:
+            first_identity = alert_identities[0]
+            duration_info = self.get_violation_duration_info(first_identity)
+            message += f" selama {duration_info['seconds']:.1f} detik"
         
-        # # Add urgency for multiple violations
-        # total_violations = len(alert_violations)
-        # if total_violations > 2:
-        #     message += ". Situasi darurat!"
+        # Add urgency for multiple violations
+        total_violations = len(alert_violations)
+        if total_violations > 2:
+            message += ". Situasi darurat!"
         
         # Send the alert
         return self.send_voice_alert(message)
@@ -534,90 +532,27 @@ class DurationAwareAlertManager:
         )
         thread.start()
         return True
-            
-    def _log_audio_alert(self, message: str, status: str):
-        """Log audio alerts to CSV file with retry information"""
-        try:
-            if not hasattr(self, 'audio_logging_enabled') or not self.audio_logging_enabled:
-                return
-                
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            log_data = {
-                'timestamp': timestamp,
-                'alert_message': message,
-                'status': status,
-                'server_url': self.server_url,
-                'retry_config': f"{self.max_retries} attempts, {self.retry_delay}s delay"  # 🆕 Add retry info
-            }
-            
-            # Append to the main log file if available
-            if hasattr(self, 'log_file') and self.log_file:
-                with open(self.log_file, 'a', newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f)
-                    writer.writerow([
-                        log_data['timestamp'],
-                        'AUDIO_ALERT',  # Special identifier for audio alerts
-                        log_data['alert_message'],
-                        log_data['status'],
-                        log_data['server_url'],
-                        log_data['retry_config']  # 🆕 Include retry info
-                    ])
-                    
-        except Exception as e:
-            print(f"❌ Failed to log audio alert: {e}") 
 
     def _send_alert_thread(self, message: str, identity: str, mask_status: str):
-        """Background thread for sending alerts with RETRY LOGIC"""
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        for attempt in range(self.max_retries):
-            try:
-                # URL encode the message
-                encoded_message = quote(message)
-                alert_url = f"{self.server_url}?pesan={encoded_message}"
-                
-                # 🆕 Log attempt with retry info
-                if attempt == 0:
-                    print(f"🎵 [{timestamp}] Sending voice alert: {message}")
-                else:
-                    print(f"🔄 [{timestamp}] Retry {attempt}/{self.max_retries}: {message}")
-                
-                # Send HTTP request with timeout
-                response = requests.get(alert_url, timeout=self.retry_timeout)
-                
-                if response.status_code == 200:
-                    print(f"🔊 [{timestamp}] Voice alert sent successfully")
-                    # 🆕 Log to CSV if audio logging is enabled
-                    if hasattr(self, 'audio_logging_enabled') and self.audio_logging_enabled:
-                        self._log_audio_alert(message, f"SUCCESS (attempt {attempt + 1})")
-                    return  # Success - exit retry loop
-                else:
-                    error_msg = f"HTTP {response.status_code}"
-                    print(f"❌ [{timestamp}] Attempt {attempt + 1} failed: {error_msg}")
-                    
-            except requests.exceptions.Timeout:
-                error_msg = "Request timeout"
-                print(f"⏰ [{timestamp}] Attempt {attempt + 1} failed: {error_msg}")
-            except requests.exceptions.ConnectionError:
-                error_msg = "Connection error"
-                print(f"🔌 [{timestamp}] Attempt {attempt + 1} failed: {error_msg}")
-            except requests.exceptions.RequestException as e:
-                error_msg = f"Request error: {e}"
-                print(f"❌ [{timestamp}] Attempt {attempt + 1} failed: {error_msg}")
-            except Exception as e:
-                error_msg = f"Unexpected error: {e}"
-                print(f"🚨 [{timestamp}] Attempt {attempt + 1} failed: {error_msg}")
+        """Background thread for sending alerts"""
+        try:
+            # URL encode the message
+            encoded_message = quote(message)
+            alert_url = f"{self.server_url}?pesan={encoded_message}"
             
-            # 🆕 If not the last attempt, wait before retrying
-            if attempt < self.max_retries - 1:
-                print(f"⏳ [{timestamp}] Retrying in {self.retry_delay} seconds...")
-                time.sleep(self.retry_delay)
-        
-        # 🆕 If we get here, all attempts failed
-        final_error = f"All {self.max_retries} attempts failed"
-        print(f"🚨 [{timestamp}] {final_error} for alert: {message}")
-        if hasattr(self, 'audio_logging_enabled') and self.audio_logging_enabled:
-            self._log_audio_alert(message, f"FAILED: {final_error}")                
+            # Send HTTP request with timeout
+            response = requests.get(alert_url, timeout=5)
+            
+            if response.status_code == 200:
+                print(f"🔊 Voice alert sent: {message}")
+            else:
+                print(f"❌ Alert server returned status: {response.status_code}")
+                
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Failed to send voice alert: {e}")
+        except Exception as e:
+            print(f"❌ Unexpected error in alert thread: {e}")
+
     def toggle_alerts(self):
         """Toggle voice alerts on/off"""
         self.enabled = not self.enabled
@@ -626,20 +561,18 @@ class DurationAwareAlertManager:
         return self.enabled
 
     def get_duration_stats(self) -> Dict:
-        """Get current duration tracking statistics with real-time updates"""
+        """Get current duration tracking statistics"""
         stats = {
             'total_tracked_identities': len(self.violation_timers),
             'alerted_identities': list(self.alerted_identities),
             'violation_timers': {}
         }
         
-        current_time = time.time()
         for identity, timer in self.violation_timers.items():
             stats['violation_timers'][identity] = {
                 'frame_count': timer['frame_count'],
-                'duration_seconds': current_time - timer['start_time'],  # 🆕 Real-time duration
-                'continuous': timer.get('continuous', True),
-                'last_frame': timer['last_frame']
+                'duration_seconds': time.time() - timer['start_time'],
+                'continuous': timer.get('continuous', True)
             }
         
         return stats
@@ -2041,14 +1974,6 @@ class FaceRecognitionSystem:
         self._load_models()
         self._load_mask_detector()  
         self._load_embeddings_database()
-        
-    def reset_statistics_periodically(self):
-        """Reset statistics periodically to prevent memory issues"""
-        if self.debug_stats['total_frames_processed'] % 1000 == 0:  # Reset every 1000 frames
-            self.debug_stats['total_frames_processed'] = 0
-            self.debug_stats['total_faces_detected'] = 0
-            self.debug_stats['total_faces_recognized'] = 0
-            self.debug_stats['total_masks_detected'] = 0        
 
     def _load_mask_detector(self):
         """Load ONNX mask detection model"""
@@ -2402,7 +2327,371 @@ class FaceRecognitionSystem:
         """Get list of all known identities"""
         return list(self.identity_centroids.keys())
 
-# 🔧 INTEGRATION WITH EXISTING FACE RECOGNITION SYSTEM
+class VoyagerFaceRecognitionSystem(FaceRecognitionSystem):
+    def __init__(self, config: Dict):
+        # Initialize Voyager-specific attributes FIRST
+        self.voyager_index = None
+        self.voyager_id_to_identity = {}
+        self.identity_to_voyager_id = {}
+        self.next_voyager_id = 0
+        self.voyager_performance_monitor = VoyagerPerformanceMonitor()
+        
+        # Now call parent constructor
+        super().__init__(config)
+        
+    def _load_embeddings_database(self):
+        """Load embeddings into Voyager index instead of manual centroids"""
+        try:
+            db_path = Path(self.config['embeddings_db_path'])
+            if not db_path.exists():
+                print("⚠️  Embeddings database not found, starting fresh")
+                self.embeddings_db = {"persons": {}, "metadata": {}}
+                # Initialize empty Voyager index for future additions
+                self._initialize_voyager_index(128)  # Default dimension
+                return
+                
+            with open(db_path, 'r') as f:
+                self.embeddings_db = json.load(f)
+                
+            if "persons" in self.embeddings_db:
+                # First, determine embedding dimension from the data
+                embedding_dim = self._get_embedding_dimension_from_data()
+                print(f"🔍 Detected embedding dimension: {embedding_dim}")
+                
+                # Initialize Voyager index with correct dimension
+                self._initialize_voyager_index(embedding_dim)
+                
+                vectors = []
+                voyager_ids = []
+                identities = []
+                
+                for person_id, person_data in self.embeddings_db["persons"].items():
+                    display_name = person_data["display_name"]
+                    
+                    # Extract centroid embedding from your database structure
+                    if "centroid_embedding" in person_data and person_data["centroid_embedding"]:
+                        centroid = np.array(person_data["centroid_embedding"])
+                    else:
+                        # Fallback: use first embedding if no centroid
+                        if (person_data.get("embeddings") and 
+                            len(person_data["embeddings"]) > 0 and
+                            "vector" in person_data["embeddings"][0]):
+                            centroid = np.array(person_data["embeddings"][0]["vector"])
+                            print(f"⚠️  Using first embedding as centroid for {display_name}")
+                        else:
+                            print(f"❌ No embeddings found for {display_name}, skipping")
+                            continue
+                    
+                    # Store mapping and prepare for batch addition
+                    voyager_id = self.next_voyager_id
+                    self.voyager_id_to_identity[voyager_id] = display_name
+                    self.identity_to_voyager_id[display_name] = voyager_id
+                    self.identity_centroids[display_name] = centroid  # Keep for compatibility
+                    
+                    vectors.append(centroid)
+                    voyager_ids.append(voyager_id)
+                    identities.append(display_name)
+                    self.next_voyager_id += 1
+                
+                # Batch add to Voyager for better performance
+                if vectors:
+                    vectors_array = np.array(vectors)
+                    self.voyager_index.add_items(vectors_array, voyager_ids)
+                    print(f"✅ Loaded {len(vectors)} identities into Voyager index")
+                    
+                    # Get the correct item count attribute
+                    item_count = self._get_voyager_item_count()
+                    print(f"📊 Voyager index size: {item_count} items")
+                    
+                    # Test query to verify index is working
+                    if len(vectors) > 0:
+                        try:
+                            test_neighbors, test_distances = self.voyager_index.query(vectors[0], k=1)
+                            if test_neighbors and len(test_neighbors) > 0:
+                                print(f"🧪 Voyager test query successful: {len(test_neighbors)} results")
+                        except Exception as e:
+                            print(f"⚠️  Voyager test query failed: {e}")
+                
+                print(f"✅ Loaded {len(self.voyager_id_to_identity)} identities from database")
+                print(f"📊 Available persons: {list(self.voyager_id_to_identity.values())}")
+                
+            else:
+                print("⚠️  No 'persons' key found in JSON database")
+                self._initialize_voyager_index(128)  # Default dimension
+                
+        except Exception as e:
+            print(f"❌ Failed to load embeddings database: {e}")
+            import traceback
+            traceback.print_exc()
+            # Initialize empty index anyway
+            self._initialize_voyager_index(128)
+
+    def _get_embedding_dimension_from_data(self) -> int:
+        """Determine embedding dimension from the actual data"""
+        try:
+            # Look at the first person's centroid to determine dimension
+            first_person = next(iter(self.embeddings_db["persons"].values()))
+            
+            if "centroid_embedding" in first_person and first_person["centroid_embedding"]:
+                return len(first_person["centroid_embedding"])
+            elif (first_person.get("embeddings") and 
+                  len(first_person["embeddings"]) > 0 and
+                  "vector" in first_person["embeddings"][0]):
+                return len(first_person["embeddings"][0]["vector"])
+            else:
+                # Check embedding_length field
+                if first_person.get("embeddings") and len(first_person["embeddings"]) > 0:
+                    return first_person["embeddings"][0].get("embedding_length", 128)
+        except Exception as e:
+            print(f"⚠️  Could not determine embedding dimension from data: {e}")
+        
+        # Fallback to model-based dimension
+        return self._get_embedding_dimension_from_model()
+
+    def _get_embedding_dimension_from_model(self) -> int:
+        """Determine embedding dimension based on model (fallback)"""
+        model_dimensions = {
+            'Facenet': 128,      # Based on your data, Facenet uses 128
+            'VGGFace': 4096,     # VGGFace uses 4096
+            'OpenFace': 128,     # OpenFace uses 128
+            'Facenet512': 512,   # Facenet512 uses 512
+            'DeepFace': 4096,    # DeepFace default (VGGFace)
+        }
+        model = self.config.get('embedding_model', 'Facenet')
+        dimension = model_dimensions.get(model, 128)  # Default to 128 based on your data
+        print(f"🔍 Using model-based dimension {dimension} for {model}")
+        return dimension
+
+    def _initialize_voyager_index(self, dimension: int):
+        """Initialize Voyager index with specific dimension"""
+        print(f"🔧 Initializing Voyager index with dimension {dimension}")
+        
+        try:
+            # Use cosine similarity as it matches your current approach
+            self.voyager_index = Index(Space.Cosine, num_dimensions=dimension)
+            print("🎯 Voyager index initialized with auto-tuning")
+        except Exception as e:
+            print(f"❌ Failed to initialize Voyager index: {e}")
+            self.voyager_index = None
+
+    def _get_voyager_item_count(self) -> int:
+        """Safely get the number of items in Voyager index"""
+        if self.voyager_index is None:
+            return 0
+        
+        # Try different possible attribute names for item count
+        try:
+            if hasattr(self.voyager_index, 'get_n_items'):
+                return self.voyager_index.get_n_items()
+            elif hasattr(self.voyager_index, 'num_items'):
+                return self.voyager_index.num_items
+            elif hasattr(self.voyager_index, 'n_items'):
+                return self.voyager_index.n_items
+            else:
+                # If we can't determine, return the count from our mapping
+                return len(self.voyager_id_to_identity)
+        except Exception as e:
+            print(f"⚠️  Could not get Voyager item count: {e}")
+            return len(self.voyager_id_to_identity)
+
+    def recognize_face(self, embedding: np.ndarray) -> Tuple[Optional[str], float]:
+        """Enhanced recognition using Voyager's approximate nearest neighbor search"""
+        start_time = time.time()
+        
+        # Use Voyager if available and configured
+        if (self.voyager_index is not None and 
+            self._get_voyager_item_count() > 0 and
+            self.config.get('use_voyager', True)):
+            
+            result = self._recognize_with_voyager(embedding, start_time)
+            if result[0] is not None:  # If Voyager found a match
+                return result
+            # If Voyager didn't find a match, fall through to original method
+        
+        # Fallback to original recognition method
+        result = self._recognize_face_original(embedding, start_time)
+        self.voyager_performance_monitor.record_voyager_performance(
+            start_time, success=False, used_fallback=True
+        )
+        return result
+
+    def _recognize_with_voyager(self, embedding: np.ndarray, start_time: float) -> Tuple[Optional[str], float]:
+        """Recognition using Voyager index"""
+        try:
+            # Ensure embedding is the right shape and type
+            embedding = embedding.flatten().astype(np.float32)
+            
+            # Query Voyager for nearest neighbors - use adaptive k based on index size
+            item_count = self._get_voyager_item_count()
+            k = min(5, item_count)
+            
+            neighbors, distances = self.voyager_index.query(embedding, k=k)
+            
+            if len(neighbors) == 0 or len(distances) == 0:
+                return None, 0.0
+            
+            # Convert Voyager distance to similarity score 
+            # Voyager Cosine space: distance = 1 - cosine_similarity
+            best_similarity = 1.0 - distances[0]
+            best_voyager_id = neighbors[0]
+            
+            threshold = self.config['recognition_threshold']
+            
+            if best_similarity >= threshold:
+                identity = self.voyager_id_to_identity.get(best_voyager_id)
+                
+                # Record successful Voyager query
+                self.voyager_performance_monitor.record_voyager_performance(
+                    start_time, success=True, used_fallback=False
+                )
+                
+                if self.config.get('verbose_voyager', False):
+                    print(f"🎯 Voyager matched: {identity} (similarity: {best_similarity:.3f})")
+                
+                return identity, best_similarity
+            
+            # No match above threshold
+            self.voyager_performance_monitor.record_voyager_performance(
+                start_time, success=False, used_fallback=False
+            )
+            return None, best_similarity
+            
+        except Exception as e:
+            print(f"❌ Voyager recognition error: {e}")
+            self.voyager_performance_monitor.record_voyager_performance(
+                start_time, success=False, used_fallback=True
+            )
+            return None, 0.0
+
+    def _recognize_face_original(self, embedding: np.ndarray, start_time: float) -> Tuple[Optional[str], float]:
+        """Original recognition method as fallback"""
+        if not self.identity_centroids:
+            return None, 0.0
+            
+        best_similarity = -1.0
+        best_identity = None
+        
+        embedding = embedding.flatten()
+        
+        for identity, centroid in self.identity_centroids.items():
+            centroid = centroid.flatten()
+            
+            # Cosine similarity (primary)
+            cosine_sim = cosine_similarity([embedding], [centroid])[0][0]
+            
+            # Optional: Euclidean distance (normalized to 0-1)
+            euclidean_dist = np.linalg.norm(embedding - centroid)
+            euclidean_sim = 1 / (1 + euclidean_dist)  # Convert distance to similarity
+            
+            # Combine strategies (weighted)
+            final_similarity = 0.8 * cosine_sim + 0.2 * euclidean_sim
+            
+            if final_similarity > best_similarity and final_similarity >= self.config['recognition_threshold']:
+                best_similarity = final_similarity
+                best_identity = identity
+        
+        recognition_time = (time.time() - start_time) * 1000
+        self.debug_stats['recognition_times'].append(recognition_time)
+        
+        return best_identity, best_similarity
+
+    def add_identity_to_voyager(self, identity: str, embedding: np.ndarray):
+        """Add new identity to Voyager index"""
+        if self.voyager_index is None:
+            # Initialize with the dimension of the new embedding
+            dimension = len(embedding.flatten())
+            self._initialize_voyager_index(dimension)
+        
+        # Check if identity already exists
+        if identity in self.identity_to_voyager_id:
+            voyager_id = self.identity_to_voyager_id[identity]
+            print(f"🔄 Updating existing identity '{identity}' in Voyager index")
+        else:
+            voyager_id = self.next_voyager_id
+            self.next_voyager_id += 1
+        
+        # Update mappings
+        self.voyager_id_to_identity[voyager_id] = identity
+        self.identity_to_voyager_id[identity] = voyager_id
+        self.identity_centroids[identity] = embedding  # Maintain compatibility
+        
+        # Add to Voyager index
+        embedding_flat = embedding.flatten().astype(np.float32)
+        self.voyager_index.add_items(np.array([embedding_flat]), [voyager_id])
+        
+        item_count = self._get_voyager_item_count()
+        print(f"✅ Added/updated identity '{identity}' in Voyager index (ID: {voyager_id})")
+        print(f"📊 Voyager index now contains {item_count} items")
+
+    def get_voyager_stats(self) -> Dict:
+        """Get Voyager performance statistics"""
+        stats = self.voyager_performance_monitor.get_voyager_stats()
+        item_count = self._get_voyager_item_count()
+        
+        stats.update({
+            'voyager_index_size': item_count,
+            'total_identities': len(self.voyager_id_to_identity),
+            'index_initialized': self.voyager_index is not None
+        })
+        return stats
+
+    def print_voyager_status(self):
+        """Print Voyager system status"""
+        stats = self.get_voyager_stats()
+        print("\n" + "="*50)
+        print("🛰️  VOYAGER VECTOR SEARCH STATUS")
+        print("="*50)
+        print(f"Index Initialized: {stats['index_initialized']}")
+        print(f"Index Size: {stats['voyager_index_size']} items")
+        print(f"Total Identities: {stats['total_identities']}")
+        print(f"Total Queries: {stats['total_queries']}")
+        if stats['total_queries'] > 0:
+            print(f"Average Query Time: {stats['avg_query_time']:.2f}ms")
+            print(f"Fallback Rate: {(stats['fallback_count']/stats['total_queries'])*100:.1f}%")
+            print(f"Success Rate: {stats['recall_rate']*100:.1f}%")
+        else:
+            print("Average Query Time: N/A")
+            print("Fallback Rate: N/A")
+            print("Success Rate: N/A")
+        print("="*50)
+                       
+class VoyagerPerformanceMonitor:
+    def __init__(self):
+        self.recognition_times = deque(maxlen=100)
+        self.voyager_stats = {
+            'total_queries': 0,
+            'successful_queries': 0,
+            'avg_query_time': 0.0,
+            'recall_rate': 0.0,
+            'fallback_count': 0
+        }
+    
+    def record_voyager_performance(self, start_time: float, success: bool, used_fallback: bool = False):
+        query_time = (time.time() - start_time) * 1000
+        self.recognition_times.append(query_time)
+        
+        self.voyager_stats['total_queries'] += 1
+        
+        if success:
+            self.voyager_stats['successful_queries'] += 1
+        
+        if used_fallback:
+            self.voyager_stats['fallback_count'] += 1
+        
+        # Update averages
+        if self.recognition_times:
+            self.voyager_stats['avg_query_time'] = np.mean(self.recognition_times)
+        
+        # Update recall rate
+        if self.voyager_stats['total_queries'] > 0:
+            self.voyager_stats['recall_rate'] = (
+                self.voyager_stats['successful_queries'] / 
+                self.voyager_stats['total_queries']
+            )
+
+    def get_voyager_stats(self) -> Dict:
+        return self.voyager_stats.copy()        
+ 
 
 def get_quality_factors_method_selection(self, quality_scores: Dict[str, float]) -> List[str]:
     """Select methods based on specific quality factors"""
@@ -2776,7 +3065,7 @@ class RealTimeProcessor:
         self.context_debug_mode = False
 
         # Performance tracking
-        self.performance_history = deque(maxlen=100)
+        self.performance_history = []
         self.consecutive_poor_detections = 0
         self.consecutive_good_detections = 0
         self.adjustment_cooldown = 0
@@ -2884,7 +3173,6 @@ class RealTimeProcessor:
 
         # Enhanced logging system
         self.logging_enabled = False
-        self.audio_logging_enabled = False
         self.log_file = None
         self.log_start_time = None
         self.log_interval = 5 
@@ -2922,43 +3210,6 @@ class RealTimeProcessor:
         
         print("🖼️  Enhanced image logging system READY") 
         print("🔊 Voice alert system READY")
-            
-    def perform_memory_cleanup(self):
-        """Periodic memory cleanup"""
-        if self.frame_count % 500 == 0:  # Every 500 frames
-            # Clear various histories and buffers
-            if len(self.performance_history) > 100:
-                self.performance_history.clear()
-            
-            # Force garbage collection
-            import gc
-            gc.collect()
-            
-            # Reset face system statistics periodically
-            if hasattr(self, 'face_system'):
-                self.face_system.reset_statistics_periodically()
-            
-            #print(f"🧹 Memory cleanup performed at frame {self.frame_count}")        
-             
-    def monitor_system_health(self):
-        """Monitor system health and adjust accordingly"""
-        if self.frame_count % 100 == 0:
-            # Check if processing is falling behind
-            processing_lag = time.time() - self.last_processed_time
-            if processing_lag > 1.0:  # 1 second lag
-                print(f"⚠️ System lagging: {processing_lag:.2f}s - reducing load")
-                self.processing_interval = min(self.processing_interval + 2, 30)
-                
-            # Check memory usage
-            try:
-                import psutil
-                process = psutil.Process()
-                memory_mb = process.memory_info().rss / 1024 / 1024
-                if memory_mb > 1050:  # 1050 MB threshold
-                    print(f"⚠️ High memory usage: {memory_mb:.1f}MB - performing cleanup")
-                    self.perform_memory_cleanup()
-            except ImportError:
-                pass             
              
     def toggle_context_awareness(self):
         """Toggle context-aware scaling"""
@@ -2992,6 +3243,12 @@ class RealTimeProcessor:
                 print(f"   {count:2}x {reason}")
         
         print("="*60)
+        
+    # Add to RealTimeProcessor class
+    def print_voyager_status(self):
+        """Print Voyager vector search status"""
+        if hasattr(self.face_system, 'print_voyager_status'):
+            self.face_system.print_voyager_status()        
 
     def update_dynamic_system(self):
         """Update dynamic adjustment system state"""
@@ -3073,10 +3330,11 @@ class RealTimeProcessor:
             int(y2 * scale_y)
         ]        
         
-    def check_and_send_alerts(self, results: List[Dict]) -> Dict:
-        """Enhanced alert checking with detailed tracking information"""
+        
+    def check_and_send_alerts(self, results: List[Dict]):
+        """Enhanced alert checking with duration thresholds"""
         if not self.alert_manager.enabled:
-            return {}
+            return
             
         # Detect current violations
         current_violations = []
@@ -3090,32 +3348,13 @@ class RealTimeProcessor:
                     'bbox': result['bbox']
                 })
         
-        # Use duration-aware alerting and get detailed results
-        alert_triggered = self.alert_manager.trigger_duration_alert(current_violations, self.frame_count)
+        # Use duration-aware alerting
+        self.alert_manager.trigger_duration_alert(current_violations, self.frame_count)
         
-        # 🆕 Return detailed alert activity information
-        alert_results = {
-            'triggered_alerts': current_violations if alert_triggered else [],
-            'cooldown_skipped': self._get_cooldown_identities(current_violations),
-            'duration_tracking': self.alert_manager.get_duration_stats().get('violation_timers', {}),
-            'alert_sent': alert_triggered
-        }
-        
-        return alert_results
-        
-    def _get_cooldown_identities(self, violations: List[Dict]) -> List[str]:
-        """Get identities that are in cooldown and skipped for alerts"""
-        cooldown_identities = []
-        current_time = time.time()
-        
-        for violation in violations:
-            identity = violation.get('identity', 'Unknown')
-            # Check if this identity was recently alerted
-            if identity in self.alert_manager.alerted_identities:
-                cooldown_identities.append(identity)
-        
-        return cooldown_identities    
-         
+        # 🆕 Optional: Print duration tracking debug info
+        if self.config.get('verbose_duration_tracking', False) and current_violations:
+            self._print_duration_debug(current_violations)
+            
     def _print_duration_debug(self, violations: List[Dict]):
         """Print duration tracking debug information"""
         for violation in violations[:2]:  # Only first 2 to avoid spam
@@ -3815,21 +4054,15 @@ class RealTimeProcessor:
         if not self.logging_enabled:
             # Enable both CSV and image logging
             self.setup_logging(filename)
-            self.setup_image_logging(self.log_file)
+            self.setup_image_logging(self.log_file)  # Use same base filename
             self.logging_enabled = True
             self.image_logging_enabled = True
             self.log_counter = 0
             self.saved_image_count = 0
-            
-            # 🆕 Enable audio alert logging
-            self.audio_logging_enabled = True
             print("🟢 Enhanced logging STARTED")
             print("   - CSV: timestamp, identity, mask_status")
             print("   - Images: jpeg frames for mask violations")
-            print("   - Audio: voice alert logging with retry")
-            print(f"   - Retry: {self.alert_manager.max_retries} attempts")
             print(f"   - Image folder: {self.image_log_folder}")
-            
         else:
             # Disable both
             if self.log_file:
@@ -3839,14 +4072,11 @@ class RealTimeProcessor:
                 print(f"   - CSV entries: {self.log_counter}")
                 print(f"   - Violation images: {self.saved_image_count}")
             
-            # 🆕 Disable audio alert logging
-            self.audio_logging_enabled = False
             self.logging_enabled = False
             self.image_logging_enabled = False
             self.log_file = None
             self.image_log_folder = None
             self.log_start_time = None
-                            
                                      
     def collect_log_data(self, results: List[Dict]) -> List[Dict]:
         """Collect individual face recognition and mask status data - FIXED"""
@@ -3903,37 +4133,30 @@ class RealTimeProcessor:
             print(f"❌ Log write error: {e}")
                                         
     def setup_logging(self, filename: str = None):
-        """Setup CSV logging with face names, mask status, and audio alerts"""
+        """Setup CSV logging with face names and mask status - FIXED"""
         try:
             if filename is None:
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")  # FIXED: datetime.datetime
                 filename = f"face_recognition_detailed_{timestamp}.csv"
             
             self.log_file = filename
-            self.log_start_time = datetime.datetime.now()
+            self.log_start_time = datetime.datetime.now()  # FIXED: datetime.datetime
             
-            # 🆕 Enhanced header with audio alert support
-            enhanced_columns = [
-                'timestamp', 
-                'identity', 
-                'mask_status',
-                'alert_type',    # 🆕 New column
-                'alert_status'   # 🆕 New column
-            ]
-            
+            # Write simplified header
             with open(self.log_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                writer.writerow(enhanced_columns)
+                writer.writerow(self.log_columns)
             
-            print(f"📊 Enhanced logging ENABLED: {filename}")
-            print(f"   - Columns: {enhanced_columns}")
-            print(f"   - Logging: Recognized faces + mask status + audio alerts")
+            print(f"📊 Detailed face logging ENABLED: {filename}")
+            print(f"   - Columns: {self.log_columns}")
+            print(f"   - Logging: Recognized faces with mask status")
+            print(f"   - Interval: Every {self.log_interval} processed frames")
             
         except Exception as e:
             print(f"❌ Failed to setup logging: {e}")
             self.logging_enabled = False
-            self.log_file = None
-            
+            self.log_file = None                                  
+
     def take_annotated_snapshot(self, frame: np.ndarray):
         """Take snapshot with overlay information"""
         timestamp = int(time.time())
@@ -4363,6 +4586,13 @@ class RealTimeProcessor:
             old_interval = self.processing_interval
             self.processing_interval = min(self.processing_interval + 1, 30)
             print(f"⏱️  Processing interval: 1/{old_interval} → 1/{self.processing_interval}")
+
+        # Add to handle_key_controls method in RealTimeProcessor
+        elif key == ord('Y'):  # Capital Y for Voyager status
+            if hasattr(self.face_system, 'print_voyager_status'):
+                self.face_system.print_voyager_status()
+            else:
+                print("❌ Voyager system not available")            
             
         elif key == ord('-'):  # Decrease processing interval (process more frames)
             old_interval = self.processing_interval
@@ -4620,9 +4850,9 @@ class RealTimeProcessor:
                 print("🎯 ALL CONDITIONS MET - Image should be saved!")
             else:
                 print("⏰ Some conditions not met for image saving")
-                            
+                    
     def log_performance_data(self, results: List[Dict], display_frame: np.ndarray = None, original_frame: np.ndarray = None):
-        """Enhanced logging with voice alerts and retry tracking"""
+        """Enhanced logging with voice alerts"""
         if not self.logging_enabled:
             return
         
@@ -4633,36 +4863,8 @@ class RealTimeProcessor:
         print(f"\n=== LOGGING DEBUG Frame {self.processing_count} ===")
         self.debug_logging_flow(results)
         
-        # 🆕 ENHANCED: CHECK FOR MASK VIOLATIONS AND SEND ALERTS WITH DETAILED LOGGING
-        alert_results = self.check_and_send_alerts(results)
-        
-        # 🆕 LOG ALERT ACTIVITY
-        if alert_results:
-            print(f"🎯 ALERT ACTIVITY SUMMARY:")
-            print(f"   - Triggered alerts: {len(alert_results['triggered_alerts'])}")
-            print(f"   - Cooldown skipped: {len(alert_results['cooldown_skipped'])}")
-            print(f"   - Duration tracking: {len(alert_results['duration_tracking'])} identities")
-            
-            # Show detailed alert information
-            for alert in alert_results['triggered_alerts']:
-                identity = alert.get('identity', 'Unknown')
-                duration_info = self.alert_manager.get_violation_duration_info(identity)
-                print(f"   🔊 ALERTING: {identity} - {duration_info['frames']} frames, {duration_info['seconds']:.1f}s")
-                
-            # Show identities in cooldown
-            if alert_results['cooldown_skipped']:
-                print(f"   ⏰ COOLDOWN: {len(alert_results['cooldown_skipped'])} identities waiting")
-                for identity in list(alert_results['cooldown_skipped'])[:3]:  # Show first 3
-                    print(f"      - {identity}")
-                    
-            # Show duration tracking status
-            if alert_results['duration_tracking']:
-                print(f"   📊 DURATION TRACKING:")
-                for identity, timer in list(alert_results['duration_tracking'].items())[:3]:  # Show first 3
-                    status = "ALERTED" if identity in self.alert_manager.alerted_identities else "TRACKING"
-                    print(f"      - {identity}: {timer['frame_count']} frames, {timer['duration_seconds']:.1f}s - {status}")
-        else:
-            print(f"🎯 ALERT ACTIVITY: No alerts triggered this cycle")
+        # 🆕 CHECK FOR MASK VIOLATIONS AND SEND ALERTS
+        self.check_and_send_alerts(results)
         
         try:
             # CSV logging: Write entries for recognized faces
@@ -4708,36 +4910,26 @@ class RealTimeProcessor:
             print("=== END DEBUG ===\n")
                     
         except Exception as e:
-            print(f"❌ Enhanced logging error: {e}")                                                               
+            print(f"❌ Enhanced logging error: {e}")
+                                                       
     def run(self, source: str = "0"):
-        """Main loop with memory management"""
+        """Main loop with enhanced image logging"""
         try:
             self.initialize_stream(source)
             self.start_frame_capture()
             
-            print("🎮 Starting with MEMORY MANAGEMENT SYSTEM")
+            print("🎮 Starting with ENHANCED IMAGE LOGGING SYSTEM")
             self.print_control_reference()
             
             last_results = []
             last_performance = {}
             
             while self.running:
-                # System health monitoring
-                self.monitor_system_health()
-                
                 # Use stable frame acquisition
                 original_frame = self.get_frame_for_processing()
                 if original_frame is None:
-                    time.sleep(0.03)  # Increased from 0.005 to 0.03 (33ms ~ 30fps)
+                    time.sleep(0.005)
                     continue
-                
-                # Skip frames if queue is backing up
-                if self.frame_queue.qsize() > 2:
-                    continue
-                
-                # Periodic memory cleanup
-                if self.frame_count % 500 == 0:
-                    self.perform_memory_cleanup()
                 
                 self.calculate_fps()
                 self.update_dynamic_system()
@@ -4917,7 +5109,7 @@ class RealTimeProcessor:
         print(f"  Server: {self.config.get('alert_server_url', 'Not configured')}")
         
         print("\n📊 ENHANCED LOGGING SYSTEM:")
-        print("  'l' - Toggle CSV + Image + Audio logging")
+        print("  'l' - Toggle CSV + Image logging (mask violations)")
         print("  ';' - Change log interval (1-10 frames)")
         print("  ':' - Print current log status")
         print("  Features:")
@@ -4969,16 +5161,6 @@ class SimpleFaceTracker:
                 best_match_id = track_id
         
         return best_match_id
-    
-    def _cleanup_old_tracks(self, frame_count):
-        """Remove tracks that haven't been updated recently"""
-        expired_tracks = []
-        for track_id, track in self.active_tracks.items():
-            if frame_count - track['last_updated_frame'] > 100:  # 100 frames threshold
-                expired_tracks.append(track_id)
-        
-        for track_id in expired_tracks:
-            del self.active_tracks[track_id]    
     
     def _create_track(self, result, frame_count):
         """Create a new track from recognition result"""
@@ -5139,8 +5321,8 @@ CONFIG = {
     'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\person_folder_3.json',
     'detection_confidence': 0.6,
     'detection_iou': 0.6,
-    'mask_detection_threshold': 0.95,  
-    'roi_padding': 20,  
+    'mask_detection_threshold': 0.85,  
+    'roi_padding': 40,  
     'embedding_model': 'Facenet',
     'recognition_threshold': 0.6,  
     'max_faces_per_frame': 10,
@@ -5149,20 +5331,22 @@ CONFIG = {
     'tracking_max_age': 100,
     
     # 🆕 Duration threshold settings
-    'min_violation_frames': 5,      # . seconds at 10 FPS
-    'min_violation_seconds': 0.5,    # Minimum . seconds continuous violation
+    'min_violation_frames': 20,      # 2 seconds at 10 FPS
+    'min_violation_seconds': 2.0,    # Minimum 2 seconds continuous violation
     'max_gap_frames': 5,             # Allow 5-frame gaps in tracking
     'verbose_duration_tracking': True,  # Print debug info
     
-    # 🆕 Enhanced alert settings with retry configuration
-    'alert_server_url': 'https://...scasda.my.id/actions/a_notifikasi_suara_speaker.php',
-    'alert_cooldown_seconds': 5,
+    # Existing alert settings
+    'alert_server_url': 'https://your-domain.my.id/actions/a_notifikasi_suara_speaker.php',
+    'alert_cooldown_seconds': 120,
     'enable_voice_alerts': True,
     
-    # 🆕 Retry configuration
-    'alert_max_retries': 3,           # Number of retry attempts
-    'alert_retry_delay': 2,           # Seconds between retries
-    'alert_retry_timeout': 5,         # Timeout per attempt in seconds
+    # Voyager vector search Configuration
+    'use_voyager':True,
+    'voyager_space':'cosine', # 'cosine' or 'euclidean'
+    'voyager_auto_tune': True,
+    'verbose_voyager':True
+    
 }
 
 # ENHANCED CONFIG WITH SIMILARITY SETTINGS
@@ -5253,7 +5437,7 @@ def main_priority_optimized():
     # Create priority-aware system
     config_manager = ConfigManager(CONFIG)
     robust_config = config_manager.get_component_config('context_aware_processing')
-    face_system = RobustFaceRecognitionSystem(robust_config)
+    face_system = VoyagerFaceRecognitionSystem(robust_config)
     processor = RealTimeProcessor(face_system=face_system) # , processing_interval=10
     
     # Add fairness controller
@@ -5263,6 +5447,10 @@ def main_priority_optimized():
     print(f"   - Minimum: {CONTEXT_AWARE_CONFIG['min_violation_frames']} frames "
           f"({CONTEXT_AWARE_CONFIG['min_violation_seconds']}s)")
     print("   - Per-identity tracking with gap tolerance")
+    
+    print("🚀 Starting with VOYAGER VECTOR SEARCH + DURATION-AWARE ALERTS")
+    print(f"   - Voyager: Approximate Nearest Neighbor search")
+    print(f"   - Duration: {CONTEXT_AWARE_CONFIG['min_violation_frames']} frames threshold")    
     
     def priority_aware_callback(results: List[Dict]):
         """Monitor system performance and fairness"""
