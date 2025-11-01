@@ -2347,7 +2347,7 @@ class VoyagerFaceRecognitionSystem(FaceRecognitionSystem):
                 print("⚠️  Embeddings database not found, starting fresh")
                 self.embeddings_db = {"persons": {}, "metadata": {}}
                 # Initialize empty Voyager index for future additions
-                self._initialize_voyager_index(128)  # Default dimension
+                self._initialize_voyager_index(512)  # Default dimension
                 return
                 
             with open(db_path, 'r') as f:
@@ -2417,14 +2417,14 @@ class VoyagerFaceRecognitionSystem(FaceRecognitionSystem):
                 
             else:
                 print("⚠️  No 'persons' key found in JSON database")
-                self._initialize_voyager_index(128)  # Default dimension
+                self._initialize_voyager_index(512)  # Default dimension
                 
         except Exception as e:
             print(f"❌ Failed to load embeddings database: {e}")
             import traceback
             traceback.print_exc()
             # Initialize empty index anyway
-            self._initialize_voyager_index(128)
+            self._initialize_voyager_index(512)
 
     def _get_embedding_dimension_from_data(self) -> int:
         """Determine embedding dimension from the actual data"""
@@ -2441,7 +2441,7 @@ class VoyagerFaceRecognitionSystem(FaceRecognitionSystem):
             else:
                 # Check embedding_length field
                 if first_person.get("embeddings") and len(first_person["embeddings"]) > 0:
-                    return first_person["embeddings"][0].get("embedding_length", 128)
+                    return first_person["embeddings"][0].get("embedding_length", 512)
         except Exception as e:
             print(f"⚠️  Could not determine embedding dimension from data: {e}")
         
@@ -2457,8 +2457,8 @@ class VoyagerFaceRecognitionSystem(FaceRecognitionSystem):
             'Facenet512': 512,   # Facenet512 uses 512
             'DeepFace': 4096,    # DeepFace default (VGGFace)
         }
-        model = self.config.get('embedding_model', 'Facenet')
-        dimension = model_dimensions.get(model, 128)  # Default to 128 based on your data
+        model = self.config.get('embedding_model', 'Facenet512')
+        dimension = model_dimensions.get(model, 512)  # Default to 128 based on your data
         print(f"🔍 Using model-based dimension {dimension} for {model}")
         return dimension
 
@@ -5316,14 +5316,14 @@ class FairnessController:
                                  
 # Update your CONFIG dictionary:
 CONFIG = {
-    'detection_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\yolov11n-face.pt',
+    'detection_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\yolov12s-face.pt',
     'mask_model_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\run_py\mask_detector112.onnx',  
-    'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\person_folder_3.json',
+    'embeddings_db_path': r'D:\SCMA\3-APD\fromAraya\Computer-Vision-CV\3.1_FaceRecog\person_512.json',
     'detection_confidence': 0.6,
     'detection_iou': 0.6,
     'mask_detection_threshold': 0.85,  
     'roi_padding': 40,  
-    'embedding_model': 'Facenet',
+    'embedding_model': 'Facenet512',
     'recognition_threshold': 0.6,  
     'max_faces_per_frame': 10,
     'min_face_size': 40,  
@@ -5491,7 +5491,7 @@ def select_source():
     """Interactive source selection"""
     sources = {
         '1': '0',  # Default camera
-        '2': 'rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/101',
+        '2': 'rtsp://admin:Admin888@192.168.0.2:554/Streaming/Channels/601',
         '3': 'http://192.168.1.101:8080/video',
         '4': 'video.mp4'
     }
